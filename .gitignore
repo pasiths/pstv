@@ -47,3 +47,7 @@ next-env.d.ts
 
 # local caches (EPG, etc.)
 .cache/
+
+# video generation scratch (keep only public/videos/ps-demo-tv.mp4)
+/public/videos/_ps-demo-work/
+/public/videos/assets/

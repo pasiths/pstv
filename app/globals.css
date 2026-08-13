@@ -130,3 +130,8 @@
     @apply font-sans;
   }
 }
+
+/* FluxTV player frame */
+.player-shell video::-webkit-media-controls {
+  display: none !important;
+}

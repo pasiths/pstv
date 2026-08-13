@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { HlsPlayer } from "@/components/player/hls-player";
 import { ChannelGrid, type ChannelCardData } from "@/components/channels/channel-grid";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { recordWatch, toggleFavorite } from "@/actions/user";
-import { PictureInPicture2, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { LiveChatroom } from "@/components/chat/live-chatroom";
 
 export type WatcherChannel = ChannelCardData & {
@@ -133,28 +132,14 @@ export function TvWatcher({
       <section className="space-y-4">
         {active ? (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h1 className="font-heading text-2xl font-semibold tracking-tight">
-                  {active.name}
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  {active.category}
-                  {active.country ? ` · ${active.country}` : ""}
-                  {active.language ? ` · ${active.language}` : ""}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant={pip ? "default" : "outline"}
-                size="sm"
-                onClick={() => setPip((v) => !v)}
-              >
-                <PictureInPicture2 className="size-4" />
-                PiP
-              </Button>
-            </div>
-            <HlsPlayer src={active.streamUrl} title={active.name} pip={pip} />
+            <HlsPlayer
+              src={active.streamUrl}
+              title={active.name}
+              category={active.category}
+              country={active.country}
+              pip={pip}
+              onPipToggle={() => setPip((v) => !v)}
+            />
             {(epgTitle || epgNext) && (
               <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-sm">
                 {epgTitle && (
@@ -176,7 +161,7 @@ export function TvWatcher({
             )}
           </>
         ) : (
-          <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed text-muted-foreground">
+          <div className="flex aspect-video items-center justify-center rounded-2xl border border-dashed border-white/15 bg-card/20 text-muted-foreground">
             No channel selected
           </div>
         )}

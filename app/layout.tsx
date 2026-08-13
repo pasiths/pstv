@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-const siteUrl = SITE.url.replace(/\/$/, "");
+const siteUrl = SITE.publicUrl.replace(/\/$/, "");
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -28,17 +28,18 @@ export const metadata: Metadata = {
   description: SITE.description,
   applicationName: SITE.name,
   authors: [{ name: SITE.developer.name, url: SITE.developer.url }],
-  creator: SITE.developer.label,
-  publisher: SITE.developer.label,
+  creator: SITE.developer.name,
+  publisher: SITE.developer.name,
   keywords: [
     "PSTV",
+    "Pasith Senevirathna",
     "pasiths.tech",
+    "tv.pasiths.tech",
     "education",
     "live TV lab",
     "PWA",
     "HLS",
     "streaming education",
-    "tv.pasiths.tech",
   ],
   category: "education",
   manifest: "/manifest.webmanifest",

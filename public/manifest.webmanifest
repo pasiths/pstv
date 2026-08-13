@@ -2,7 +2,7 @@
   "id": "/",
   "name": "PSTV",
   "short_name": "PSTV",
-  "description": "Education-only live TV lab by pasiths.tech — installable on iOS, Android, and Windows.",
+  "description": "Education-only live TV lab by Pasith Senevirathna (pasiths.tech) at tv.pasiths.tech — installable on iOS, Android, and Windows.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/?source=pwa",

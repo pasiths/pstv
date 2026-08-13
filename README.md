@@ -1,6 +1,6 @@
 # PSTV
 
-Education-only live TV lab by [pasiths.tech](https://pasiths.tech).
+Education-only live TV lab by **Pasith Senevirathna** ([pasiths.tech](https://pasiths.tech)).
 
 **Live:** [https://tv.pasiths.tech](https://tv.pasiths.tech)
 

@@ -18,6 +18,15 @@ export function SiteFooter() {
             rel="noopener noreferrer"
             className="text-teal-500 hover:underline"
           >
+            {SITE.developer.name}
+          </Link>
+          {" · "}
+          <Link
+            href={SITE.developer.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
             {SITE.developer.label}
           </Link>
           {" · "}

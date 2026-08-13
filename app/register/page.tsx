@@ -48,7 +48,8 @@ export default function RegisterPage() {
           </div>
           <CardTitle className="font-heading text-2xl">Join PSTV</CardTitle>
           <CardDescription>
-            Create a free account for My List · education & development only
+            Create a free account for My List · by Pasith Senevirathna
+            (pasiths.tech)
           </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>

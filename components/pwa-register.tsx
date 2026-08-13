@@ -65,7 +65,7 @@ export function PwaRegister() {
             {iosHint
               ? "On iPhone/iPad: Share → Add to Home Screen."
               : "Works as an app on Android, Windows, and Chromebook."}{" "}
-            Education-only project by {SITE.developer.label}.
+            Education-only project by {SITE.developer.name} ({SITE.developer.label}).
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {deferred && (

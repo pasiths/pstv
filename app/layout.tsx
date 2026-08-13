@@ -139,6 +139,12 @@ export default function RootLayout({
       name: SITE.developer.name,
       url: SITE.developer.url,
     },
+    copyrightHolder: {
+      "@type": "Person",
+      name: SITE.developer.name,
+      url: SITE.developer.url,
+    },
+    creditText: SITE.channelThanks,
     educationalUse: "instruction",
     isAccessibleForFree: true,
   };

@@ -4,7 +4,7 @@ export const SITE = {
   shortName: "PSTV",
   tagline: "Education-only live TV lab",
   description:
-    "PSTV is an education-only web app for learning live streaming, IPTV catalogs, and progressive web apps. Developed by Pasith Senevirathna (pasiths.tech) for study and development — not a commercial broadcast service.",
+    "PSTV is an education-only live TV lab for learning web streaming and PWAs. Developed by Pasith Senevirathna (pasiths.tech).",
   /** Canonical public site used for SEO, sitemap, Open Graph */
   publicUrl: "https://tv.pasiths.tech",
   domain: "tv.pasiths.tech",
@@ -15,6 +15,10 @@ export const SITE = {
     url: "https://pasiths.tech",
     label: "pasiths.tech",
   },
-  educationNotice:
-    "Education & development only. PSTV is a learning project for web, streaming, and PWA skills. Not affiliated with any broadcaster.",
+  copyright: `© ${new Date().getFullYear()} Pasith Senevirathna`,
+  /** Keep short — education label only */
+  educationNotice: "Education-only.",
+  /** Thanks + copyright for channels shown in the app (rights holders) */
+  channelThanks:
+    "Thanks to all channels shown here. Copyright and credit belong to their respective owners / broadcasters.",
 } as const;

@@ -96,6 +96,22 @@ function pickLevelForPref(
   }
   return best.index;
 }
+
+function isAppleTouchDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod/i.test(ua)) return true;
+  // iPadOS 13+ reports as Mac but has touch
+  return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+}
+
+type WebKitVideo = HTMLVideoElement & {
+  webkitSupportsFullscreen?: boolean;
+  webkitDisplayingFullscreen?: boolean;
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+};
+
 type HlsPlayerProps = {
   src: string;
   title?: string;
@@ -132,6 +148,7 @@ export function HlsPlayer({
   const [playing, setPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsVisibleRef = useRef(true);
   const [reloadToken, setReloadToken] = useState(0);
   const [castAvailable, setCastAvailable] = useState(false);
   const [airPlayAvailable, setAirPlayAvailable] = useState(false);
@@ -144,17 +161,29 @@ export function HlsPlayer({
   const [activeHeight, setActiveHeight] = useState(0);
   const [qualityOpen, setQualityOpen] = useState(false);
   const qualityPrefRef = useRef<"auto" | number>("auto");
+  const [isIos, setIsIos] = useState(false);
 
   const playSrc = useProxy ? proxiedStreamUrl(src) : src;
+  // Same-origin files (PS Demo TV) must not use crossOrigin or Safari can block playback.
+  const needsCors = !playSrc.startsWith("/") && !playSrc.startsWith("blob:");
   const autoCaptions = useAutoCaptions({
     videoRef,
     enabled: captionMode === "auto-en",
   });
 
   useEffect(() => {
+    setIsIos(isAppleTouchDevice());
     setCaptionMode(readCaptionMode());
     qualityPrefRef.current = readQualityPref();
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    // Ensure inline playback on older iOS Safari builds.
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+  }, [playSrc, reloadToken]);
 
   useEffect(() => {
     try {
@@ -166,24 +195,30 @@ export function HlsPlayer({
 
   useEffect(() => {
     if (!qualityOpen) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: Event) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest("[data-quality-menu]")) return;
       setQualityOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("touchstart", onDoc, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("touchstart", onDoc);
+    };
   }, [qualityOpen]);
 
   const bumpControls = useCallback(() => {
+    controlsVisibleRef.current = true;
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
       if (playing && !error) {
+        controlsVisibleRef.current = false;
         setControlsVisible(false);
         setQualityOpen(false);
       }
-    }, 2800);
+    }, 4000);
   }, [playing, error]);
 
   const applyQuality = useCallback(
@@ -601,13 +636,26 @@ export function HlsPlayer({
 
   useEffect(() => {
     const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const onWebkitBegin = () => setIsFullscreen(true);
+    const onWebkitEnd = () => setIsFullscreen(false);
     document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
-  }, []);
+    const video = videoRef.current;
+    video?.addEventListener("webkitbeginfullscreen", onWebkitBegin);
+    video?.addEventListener("webkitendfullscreen", onWebkitEnd);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      video?.removeEventListener("webkitbeginfullscreen", onWebkitBegin);
+      video?.removeEventListener("webkitendfullscreen", onWebkitEnd);
+    };
+  }, [ready, reloadToken]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !pip) return;
+    // iPhone does not support standard PiP API the same way — skip to avoid errors.
+    if (isAppleTouchDevice() && !("requestPictureInPicture" in HTMLVideoElement.prototype)) {
+      return;
+    }
     if (document.pictureInPictureElement === video) return;
     void video.requestPictureInPicture?.().catch(() => undefined);
     return () => {
@@ -627,18 +675,50 @@ export function HlsPlayer({
     const video = videoRef.current;
     if (!video) return;
     bumpControls();
-    if (video.paused) await video.play().catch(() => undefined);
-    else video.pause();
+    try {
+      if (video.paused) {
+        await video.play();
+      } else {
+        video.pause();
+      }
+    } catch {
+      // iOS may reject play until a direct user gesture unmutes / unlocks
+    }
   };
 
   const toggleFullscreen = async () => {
     const shell = shellRef.current;
-    if (!shell) return;
+    const video = videoRef.current as WebKitVideo | null;
     bumpControls();
-    if (!document.fullscreenElement) {
-      await shell.requestFullscreen?.().catch(() => undefined);
-    } else {
-      await document.exitFullscreen?.().catch(() => undefined);
+
+    // iPhone / iPad Safari: element.requestFullscreen is missing; use WebKit video fullscreen.
+    if (video?.webkitEnterFullscreen && (isIos || !shell?.requestFullscreen)) {
+      try {
+        if (video.webkitDisplayingFullscreen) {
+          video.webkitExitFullscreen?.();
+        } else {
+          video.webkitEnterFullscreen();
+        }
+      } catch {
+        toast.error("Fullscreen is not available on this device");
+      }
+      return;
+    }
+
+    if (!shell) return;
+    try {
+      if (!document.fullscreenElement) {
+        await shell.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // Fallback for odd WebKit builds
+      try {
+        video?.webkitEnterFullscreen?.();
+      } catch {
+        toast.error("Fullscreen is not available on this device");
+      }
     }
   };
 
@@ -683,16 +763,18 @@ export function HlsPlayer({
         "player-shell group/player relative aspect-video w-full overflow-hidden",
         "rounded-2xl border border-white/10 bg-[#05080c]",
         "shadow-[0_24px_80px_-32px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.06)]",
-        controlsVisible ? "cursor-default" : "cursor-none",
+        // Avoid cursor-none on iOS — it can confuse hit-testing overlays.
+        controlsVisible || isIos ? "cursor-default" : "cursor-none",
       )}
       onMouseMove={bumpControls}
+      onTouchStart={bumpControls}
       onMouseLeave={() => {
-        if (playing && !error) {
+        if (playing && !error && !isIos) {
+          controlsVisibleRef.current = false;
           setControlsVisible(false);
           setQualityOpen(false);
         }
       }}
-      onClick={bumpControls}
     >
       <div
         aria-hidden
@@ -701,15 +783,21 @@ export function HlsPlayer({
 
       <video
         ref={videoRef}
-        className="absolute inset-0 size-full bg-black object-contain"
+        className="absolute inset-0 z-0 size-full bg-black object-contain"
         playsInline
         muted={muted}
         autoPlay
         preload="auto"
-        crossOrigin="anonymous"
+        {...(needsCors ? { crossOrigin: "anonymous" as const } : {})}
         disableRemotePlayback={false}
+        controlsList="nodownload"
         onClick={(e) => {
           e.stopPropagation();
+          // First tap shows controls; second tap toggles play (iPhone-friendly).
+          if (!controlsVisibleRef.current) {
+            bumpControls();
+            return;
+          }
           void togglePlay();
         }}
       />
@@ -826,16 +914,18 @@ export function HlsPlayer({
       )}
 
       <div
+        data-player-controls
         className={cn(
           "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-300",
           controlsVisible || !ready || error
-            ? "opacity-100"
+            ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
         )}
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
-        <div className="bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2 pb-2 pt-10 sm:px-3">
-          <div className="flex items-center gap-0.5 sm:gap-1">
+        <div className="bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-10 sm:px-3">
+          <div className="flex items-center gap-0.5 overflow-x-auto sm:gap-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ControlButton
               label={playing ? "Pause" : "Play"}
               onClick={() => void togglePlay()}
@@ -860,24 +950,27 @@ export function HlsPlayer({
                   <Volume2 className="size-[1.15rem]" />
                 )}
               </ControlButton>
-              <div
-                className={cn(
-                  "flex w-0 items-center overflow-hidden opacity-0 transition-all duration-200 ease-out",
-                  "group-hover/vol:w-24 group-hover/vol:opacity-100 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100",
-                )}
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={muted ? 0 : Math.round(volume * 100)}
-                  aria-label="Volume"
-                  className="ml-1 h-1 w-[88px] cursor-pointer appearance-none rounded-full bg-white/30 accent-white [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                  onChange={(e) => {
-                    setVolumeLevel(Number(e.target.value) / 100);
-                  }}
-                />
-              </div>
+              {/* iOS ignores programmatic volume — mute only works. */}
+              {!isIos && (
+                <div
+                  className={cn(
+                    "flex w-0 items-center overflow-hidden opacity-0 transition-all duration-200 ease-out",
+                    "group-hover/vol:w-24 group-hover/vol:opacity-100 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100",
+                  )}
+                >
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={muted ? 0 : Math.round(volume * 100)}
+                    aria-label="Volume"
+                    className="ml-1 h-1 w-[88px] cursor-pointer appearance-none rounded-full bg-white/30 accent-white [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                    onChange={(e) => {
+                      setVolumeLevel(Number(e.target.value) / 100);
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
             <span className="ml-1 hidden items-center gap-1.5 text-[11px] font-medium tracking-wide text-white/80 uppercase sm:inline-flex">
@@ -974,7 +1067,7 @@ export function HlsPlayer({
               </ControlButton>
             )}
 
-            {onPipToggle && (
+            {onPipToggle && !isIos && (
               <ControlButton
                 label="Picture in picture"
                 active={pip}
@@ -1025,11 +1118,14 @@ function ControlButton({
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
+        e.preventDefault();
         onClick();
       }}
       className={cn(
-        "inline-flex size-10 shrink-0 items-center justify-center rounded-full text-white transition",
-        "hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
+        // Larger hit area on phones (Apple HIG ~44px)
+        "inline-flex size-11 shrink-0 items-center justify-center rounded-full text-white transition sm:size-10",
+        "hover:bg-white/15 active:bg-white/20 active:scale-95",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
         "disabled:cursor-not-allowed disabled:opacity-40",
         active && "bg-white/10 text-teal-200",
       )}

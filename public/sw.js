@@ -1,9 +1,10 @@
-const CACHE = "pstv-shell-v2";
+const CACHE = "pstv-shell-v3";
 const PRECACHE = [
   "/",
   "/manifest.webmanifest",
   "/favicon.ico",
   "/og.png",
+  "/icons/logo-nav.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/apple-touch-icon.png",

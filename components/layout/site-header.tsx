@@ -1,8 +1,9 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { logoutUser } from "@/actions/auth";
-import { Heart, LayoutDashboard, Radio, UserRound } from "lucide-react";
+import { Heart, LayoutDashboard, UserRound } from "lucide-react";
 
 type SiteHeaderProps = {
   user?: {
@@ -16,11 +17,16 @@ export function SiteHeader({ user, isAdmin }: SiteHeaderProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-teal-600 text-white">
-            <Radio className="size-4" />
-          </span>
-          <span className="font-heading text-lg">
+        <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+          <Image
+            src="/icons/logo-nav.png"
+            alt="PSTV"
+            width={32}
+            height={32}
+            className="size-8 rounded-lg"
+            priority
+          />
+          <span className="font-heading text-lg tracking-tight">
             PS<span className="text-teal-500">TV</span>
           </span>
         </Link>

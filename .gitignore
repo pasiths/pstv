@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.cache/
 
 # debug
 npm-debug.log*
@@ -43,3 +44,6 @@ next-env.d.ts
 
 # prisma generated client
 /generated
+
+# local caches (EPG, etc.)
+.cache/

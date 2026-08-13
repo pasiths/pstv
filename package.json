@@ -1,5 +1,5 @@
 {
-  "name": "fluxtv",
+  "name": "pstv",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,6 +13,12 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "tv:probe": "tsx scripts/probe-streams.ts",
+    "tv:bootstrap": "tsx scripts/bootstrap-working-tv.ts",
+    "tv:import-all": "tsx scripts/import-all-fta.ts",
+    "tv:import-local": "tsx scripts/import-local-lk.ts",
+    "tv:repair": "tsx scripts/repair-streams.ts",
+    "tv:tag-premium": "tsx scripts/tag-premium.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -26,6 +32,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "dotenv": "^17.4.2",
+    "hls.js": "^1.7.0",
     "lucide-react": "^1.31.0",
     "next": "16.3.0",
     "next-themes": "^0.4.6",

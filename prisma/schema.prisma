@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================================================
+// AUTHENTICATION & RBAC
+// =========================================================
+model User {
+  id         String  @id @default(cuid())
+  name       String  @map("full_name")
+  email      String  @unique
+  phoneNo    String? @map("phone_no")
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  password    String?
+  inactive    Boolean   @default(false)
+  suspended   Boolean   @default(false)
+  suspendedAt DateTime? @map("suspended_at")
+  image       String?
+  /** Unlocks paid/premium channels when true. */
+  isPremium   Boolean   @default(false) @map("is_premium")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions         Session[]
+  accounts         Account[]
+  roles            RoleUser[]
+  favorites        Favorite[]
+  watchHistory     WatchHistory[]
+
+  @@map("user")
+}
+
+model Role {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  inactive Boolean @default(false)
+
+  users       RoleUser[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  inactive Boolean @default(false)
+
+  roles RolePermission[]
+
+  @@map("permission")
+}
+
+model RoleUser {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("role_user")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String
+  expiresAt DateTime @map("expires_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String    @map("user_id")
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  accessToken           String?   @map("access_token") @db.Text
+  refreshToken          String?   @map("refresh_token") @db.Text
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("verification")
+}
+
+// =========================================================
+// CHANNELS & USER EXPERIENCE
+// =========================================================
+model Channel {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  streamUrl   String   @map("stream_url") @db.Text
+  logoUrl     String?  @map("logo_url")
+  country     String   @default("LK")
+  countryName String?  @map("country_name")
+  language    String?
+  category    String   @default("General")
+  isLocal     Boolean  @default(false) @map("is_local")
+  /** Paid / premium channel — locked unless the viewer has premium access. */
+  isPremium   Boolean  @default(false) @map("is_premium")
+  isHidden    Boolean  @default(false) @map("is_hidden")
+  isBroken    Boolean  @default(false) @map("is_broken")
+  lastCheckedAt DateTime? @map("last_checked_at")
+  externalId  String?  @unique @map("external_id")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  favorites    Favorite[]
+  watchHistory WatchHistory[]
+  epgEntries   EpgEntry[]
+
+  @@index([country])
+  @@index([language])
+  @@index([category])
+  @@index([isLocal, isHidden])
+  @@index([isPremium, isHidden])
+  @@index([name])
+  @@map("channel")
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  channelId String   @map("channel_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@map("favorite")
+}
+
+model WatchHistory {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  channelId    String   @map("channel_id")
+  watchedAt    DateTime @default(now()) @map("watched_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([userId, watchedAt])
+  @@unique([userId, channelId])
+  @@map("watch_history")
+}
+
+model EpgEntry {
+  id          String   @id @default(cuid())
+  channelId   String   @map("channel_id")
+  title       String
+  description String?  @db.Text
+  startsAt    DateTime @map("starts_at")
+  endsAt      DateTime @map("ends_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, startsAt])
+  @@map("epg_entry")
+}

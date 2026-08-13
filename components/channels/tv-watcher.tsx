@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { HlsPlayer } from "@/components/player/hls-player";
 import { ChannelGrid, type ChannelCardData } from "@/components/channels/channel-grid";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { recordWatch, toggleFavorite } from "@/actions/user";
 import { Search } from "lucide-react";
 import { LiveChatroom } from "@/components/chat/live-chatroom";
@@ -18,9 +19,14 @@ type CountryFacet = {
   name: string;
 };
 
+type LanguageFacet = {
+  code: string;
+  name: string;
+};
+
 type Facets = {
   countries: CountryFacet[];
-  languages: string[];
+  languages: LanguageFacet[];
   categories: string[];
 };
 
@@ -41,7 +47,7 @@ type TvWatcherProps = {
 
 const DEFAULT_FACETS: Facets = {
   countries: [{ code: "All", name: "All countries" }],
-  languages: ["All"],
+  languages: [{ code: "All", name: "All languages" }],
   categories: ["All"],
 };
 
@@ -81,6 +87,15 @@ export function TvWatcher({
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const userPickedRef = useRef(false);
 
+  const countryOptions = useMemo(
+    () => facets.countries.map((c) => ({ value: c.code, label: c.name })),
+    [facets.countries],
+  );
+  const languageOptions = useMemo(
+    () => facets.languages.map((l) => ({ value: l.code, label: l.name })),
+    [facets.languages],
+  );
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => clearTimeout(t);
@@ -109,8 +124,6 @@ export function TvWatcher({
       setHasMore(data.hasMore);
       setPage(data.page);
       setChannels((prev) => (replace ? data.channels : [...prev, ...data.channels]));
-      // Keep currently playing channel sticky — never auto-switch on search/filter.
-      // Only seed an initial channel if the user hasn't picked one yet.
       if (!userPickedRef.current) {
         setActiveChannel((current) => {
           if (current) return current;
@@ -267,28 +280,20 @@ export function TvWatcher({
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <select
-              className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+            <SearchableSelect
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
-            >
-              {facets.countries.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <select
-              className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+              onChange={setCountry}
+              options={countryOptions}
+              placeholder="Country"
+              searchPlaceholder="Search countries…"
+            />
+            <SearchableSelect
               value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
-              {facets.languages.map((l) => (
-                <option key={l} value={l || "All"}>
-                  {l === "All" ? "All languages" : l}
-                </option>
-              ))}
-            </select>
+              onChange={setLanguage}
+              options={languageOptions}
+              placeholder="Language"
+              searchPlaceholder="Search languages…"
+            />
           </div>
           <div className="flex flex-wrap gap-1.5">
             <Badge

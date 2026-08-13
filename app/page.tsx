@@ -4,6 +4,7 @@ import { canAccessAdmin } from "@/lib/permissions";
 import { SiteHeader } from "@/components/layout/site-header";
 import { TvWatcher } from "@/components/channels/tv-watcher";
 import { getCountryLongName } from "@/lib/iptv-catalog";
+import { getLanguageLongName } from "@/lib/languages";
 
 export const dynamic = "force-dynamic";
 
@@ -135,10 +136,15 @@ export default async function HomePage() {
           facets={{
             countries: [{ code: "All", name: "All countries" }, ...countryFacets],
             languages: [
-              "All",
+              { code: "All", name: "All languages" },
               ...languages
                 .map((l) => l.language)
-                .filter((v): v is string => Boolean(v)),
+                .filter((v): v is string => Boolean(v))
+                .map((code) => ({
+                  code,
+                  name: getLanguageLongName(code),
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name)),
             ],
             categories: ["All", ...categories.map((c) => c.category)],
           }}

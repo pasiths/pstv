@@ -17,6 +17,7 @@ import {
   categoryPlaylistUrl,
   countryPlaylistUrl,
 } from "../lib/iptv-catalog";
+import { languageForCountry } from "../lib/languages";
 
 async function fetchPlaylist(url: string) {
   try {
@@ -55,6 +56,7 @@ async function upsertAll(items: ParsedM3uChannel[]) {
     const country = (item.country || "XX").toUpperCase();
     const countryName =
       item.countryName || getCountryLongName(country);
+    const language = item.language || languageForCountry(country) || null;
     const isLocal = country === "LK";
     const category = normalizeCategory(item.category);
     const externalId =
@@ -71,7 +73,7 @@ async function upsertAll(items: ParsedM3uChannel[]) {
           logoUrl: item.logoUrl || undefined,
           country,
           countryName,
-          language: item.language || undefined,
+          language: language || undefined,
           category,
           isLocal,
           isHidden: false,
@@ -95,7 +97,7 @@ async function upsertAll(items: ParsedM3uChannel[]) {
       logoUrl: item.logoUrl || null,
       country,
       countryName,
-      language: item.language || null,
+      language,
       category,
       isLocal,
       externalId,

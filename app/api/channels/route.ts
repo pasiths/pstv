@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCountryLongName } from "@/lib/iptv-catalog";
+import { getLanguageLongName } from "@/lib/languages";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
           OR: [
             { name: { contains: q, mode: "insensitive" as const } },
             { countryName: { contains: q, mode: "insensitive" as const } },
+            { language: { contains: q, mode: "insensitive" as const } },
           ],
         }
       : {}),
@@ -87,6 +89,15 @@ export async function GET(request: NextRequest) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const languageFacets = languages
+    .map((l) => l.language)
+    .filter((v): v is string => Boolean(v))
+    .map((code) => ({
+      code,
+      name: getLanguageLongName(code),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   return NextResponse.json({
     total,
     page,
@@ -98,10 +109,7 @@ export async function GET(request: NextRequest) {
     })),
     facets: {
       countries: [{ code: "All", name: "All countries" }, ...countryFacets],
-      languages: [
-        "All",
-        ...languages.map((l) => l.language).filter(Boolean),
-      ],
+      languages: [{ code: "All", name: "All languages" }, ...languageFacets],
       categories: [
         "All",
         ...categories.map((c) => c.category).filter(Boolean),

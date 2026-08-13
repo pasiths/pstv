@@ -17,6 +17,7 @@ import {
   categoryPlaylistUrl,
   countryPlaylistUrl,
 } from "@/lib/iptv-catalog";
+import { languageForCountry } from "@/lib/languages";
 import { revalidatePath } from "next/cache";
 
 export type ImportResult = {
@@ -123,6 +124,8 @@ export async function upsertParsedChannels(
       item.countryName ||
       options.defaultCountryName ||
       getCountryLongName(country);
+    const language =
+      item.language || languageForCountry(country) || null;
     const isLocal = options.markLocal ?? country === "LK";
     const category = normalizeCategory(item.category);
     const externalId =
@@ -141,7 +144,7 @@ export async function upsertParsedChannels(
           logoUrl: item.logoUrl || found.logoUrl,
           country,
           countryName,
-          language: item.language || found.language,
+          language: language || found.language,
           category,
           isLocal,
           isHidden: false,
@@ -166,7 +169,7 @@ export async function upsertParsedChannels(
       logoUrl: item.logoUrl || null,
       country,
       countryName,
-      language: item.language || null,
+      language: language,
       category,
       isLocal,
       externalId,

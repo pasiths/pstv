@@ -303,6 +303,9 @@ export function HlsPlayer({
 
     let cancelled = false;
     let loadTimeout: ReturnType<typeof setTimeout> | null = null;
+    let waitingTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastMediaTime = 0;
+
     setReady(false);
     setBuffering(true);
     setError(null);
@@ -315,15 +318,49 @@ export function HlsPlayer({
     setActiveHeight(0);
     setQualityOpen(false);
 
-    const onWaiting = () => setBuffering(true);
-    const onPlaying = () => {
-      setBuffering(false);
-      setReady(true);
-      setPlaying(true);
+    const clearBuffering = () => {
+      if (waitingTimer) {
+        clearTimeout(waitingTimer);
+        waitingTimer = null;
+      }
+      if (!cancelled) setBuffering(false);
     };
-    const onPause = () => setPlaying(false);
+
+    const markReadyPlaying = () => {
+      if (cancelled) return;
+      clearBuffering();
+      setReady(true);
+      setPlaying(!video.paused);
+    };
+
+    // Live HLS fires `waiting` often; only show spinner after a real stall.
+    const onWaiting = () => {
+      if (waitingTimer) clearTimeout(waitingTimer);
+      waitingTimer = setTimeout(() => {
+        if (cancelled) return;
+        if (video.readyState < 3 || video.paused) setBuffering(true);
+      }, 500);
+    };
+    const onPlaying = () => markReadyPlaying();
+    const onPause = () => {
+      if (!cancelled) setPlaying(false);
+    };
     const onCanPlay = () => {
-      setBuffering(false);
+      if (cancelled) return;
+      clearBuffering();
+      setReady(true);
+    };
+    const onTimeUpdate = () => {
+      if (cancelled) return;
+      const t = video.currentTime;
+      if (Math.abs(t - lastMediaTime) > 0.05) {
+        lastMediaTime = t;
+        markReadyPlaying();
+      }
+    };
+    const onLoadedData = () => {
+      if (cancelled) return;
+      clearBuffering();
       setReady(true);
     };
 
@@ -331,18 +368,21 @@ export function HlsPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("pause", onPause);
     video.addEventListener("canplay", onCanPlay);
+    video.addEventListener("canplaythrough", onCanPlay);
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("timeupdate", onTimeUpdate);
 
     const showFatal = (message: string) => {
       if (cancelled) return;
       setError(message);
-      setBuffering(false);
+      clearBuffering();
       setReady(false);
       setControlsVisible(true);
     };
 
     const startPlayback = async () => {
       loadTimeout = setTimeout(() => {
-        if (!cancelled && !video.played.length) {
+        if (!cancelled && !video.played.length && video.readyState < 2) {
           showFatal(
             `Timed out loading${title ? ` ${title}` : ""}. Try another channel or Retry.`,
           );
@@ -353,7 +393,13 @@ export function HlsPlayer({
         // Progressive MP4/WebM (e.g. PS Demo TV) — native element, not HLS.js
         if (isProgressiveMediaUrl(src) || isProgressiveMediaUrl(playSrc)) {
           video.src = playSrc;
-          await video.play().catch(() => undefined);
+          try {
+            await video.play();
+            markReadyPlaying();
+          } catch {
+            clearBuffering();
+            setReady(true);
+          }
           return;
         }
 
@@ -362,7 +408,13 @@ export function HlsPlayer({
           !Hls.isSupported()
         ) {
           video.src = playSrc;
-          await video.play().catch(() => undefined);
+          try {
+            await video.play();
+            markReadyPlaying();
+          } catch {
+            clearBuffering();
+            setReady(true);
+          }
           return;
         }
 
@@ -428,12 +480,17 @@ export function HlsPlayer({
             syncLevels();
             void data;
             setReady(true);
-            setBuffering(false);
+            clearBuffering();
             try {
               await video.play();
+              markReadyPlaying();
             } catch {
               // muted autoplay
             }
+          });
+
+          hls.on(Hls.Events.FRAG_BUFFERED, () => {
+            if (!cancelled) clearBuffering();
           });
 
           hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
@@ -445,7 +502,12 @@ export function HlsPlayer({
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (cancelled) return;
             if (!data.fatal) {
-              if (data.details === "bufferStalledError") setBuffering(true);
+              if (data.details === "bufferStalledError") {
+                if (waitingTimer) clearTimeout(waitingTimer);
+                waitingTimer = setTimeout(() => {
+                  if (!cancelled) setBuffering(true);
+                }, 500);
+              }
               return;
             }
 
@@ -475,7 +537,13 @@ export function HlsPlayer({
         }
 
         video.src = playSrc;
-        await video.play().catch(() => undefined);
+        try {
+          await video.play();
+          markReadyPlaying();
+        } catch {
+          clearBuffering();
+          setReady(true);
+        }
       } catch {
         showFatal(
           `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
@@ -488,10 +556,14 @@ export function HlsPlayer({
     return () => {
       cancelled = true;
       if (loadTimeout) clearTimeout(loadTimeout);
+      if (waitingTimer) clearTimeout(waitingTimer);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("pause", onPause);
       video.removeEventListener("canplay", onCanPlay);
+      video.removeEventListener("canplaythrough", onCanPlay);
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("timeupdate", onTimeUpdate);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -864,15 +936,18 @@ export function HlsPlayer({
 
       {!error && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-          {!ready || buffering ? (
+          {!ready ? (
             <div className="flex flex-col items-center gap-2">
               <div className="relative flex size-16 items-center justify-center rounded-full border border-teal-400/35 bg-black/55 shadow-lg backdrop-blur-sm">
                 <div className="absolute inset-0 animate-ping rounded-full bg-teal-400/15" />
                 <Loader2 className="relative size-7 animate-spin text-teal-300" />
               </div>
-              <p className="text-[11px] tracking-wide text-white/70">
-                {ready ? "Buffering…" : "Loading…"}
-              </p>
+              <p className="text-[11px] tracking-wide text-white/70">Loading…</p>
+            </div>
+          ) : buffering && playing ? (
+            <div className="absolute right-3 bottom-24 flex items-center gap-1.5 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-[10px] text-white/80 backdrop-blur-sm sm:bottom-28">
+              <Loader2 className="size-3 animate-spin text-teal-300" />
+              Buffering
             </div>
           ) : !playing ? (
             <button

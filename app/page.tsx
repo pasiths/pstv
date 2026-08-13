@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/session";
 import { canAccessAdmin } from "@/lib/permissions";
 import { SiteHeader } from "@/components/layout/site-header";
 import { TvWatcher } from "@/components/channels/tv-watcher";
+import { getCountryLongName } from "@/lib/iptv-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -88,17 +89,26 @@ export default async function HomePage() {
     epgNext = upcoming?.title ?? null;
   }
 
-  const mapped = channels.map((c) => ({
+  const mapChannel = (c: (typeof channels)[number]) => ({
     id: c.id,
     name: c.name,
     logoUrl: c.logoUrl,
     category: c.category,
     country: c.country,
+    countryName: getCountryLongName(c.country),
     language: c.language,
     isLocal: c.isLocal,
     isBroken: c.isBroken,
     streamUrl: c.streamUrl,
-  }));
+  });
+
+  const countryFacets = countries
+    .filter((c) => c.country)
+    .map((c) => ({
+      code: c.country,
+      name: getCountryLongName(c.country),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -120,10 +130,10 @@ export default async function HomePage() {
           </p>
         </div>
         <TvWatcher
-          initialChannels={mapped}
+          initialChannels={channels.map(mapChannel)}
           initialTotal={total}
           facets={{
-            countries: ["All", ...countries.map((c) => c.country)],
+            countries: [{ code: "All", name: "All countries" }, ...countryFacets],
             languages: [
               "All",
               ...languages
@@ -133,17 +143,7 @@ export default async function HomePage() {
             categories: ["All", ...categories.map((c) => c.category)],
           }}
           favoriteIds={favoriteIds}
-          recentChannels={recentChannels.map((c) => ({
-            id: c.id,
-            name: c.name,
-            logoUrl: c.logoUrl,
-            category: c.category,
-            country: c.country,
-            language: c.language,
-            isLocal: c.isLocal,
-            isBroken: c.isBroken,
-            streamUrl: c.streamUrl,
-          }))}
+          recentChannels={recentChannels.map(mapChannel)}
           epgTitle={epgTitle}
           epgNext={epgNext}
           userName={user?.name}

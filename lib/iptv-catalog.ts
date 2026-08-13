@@ -86,3 +86,30 @@ export function categoryPlaylistUrl(category: string) {
 export const COUNTRY_NAME_BY_CODE = Object.fromEntries(
   FTA_COUNTRIES.map((c) => [c.code.toUpperCase(), c.name]),
 ) as Record<string, string>;
+
+const displayNames =
+  typeof Intl !== "undefined"
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+/** Resolve ISO country code to a long English country name. */
+export function getCountryLongName(code?: string | null): string {
+  if (!code) return "Unknown";
+  const normalized = code.trim().toUpperCase();
+  if (normalized === "ALL") return "All countries";
+  if (normalized === "XX" || normalized === "ZZ") return "International";
+  if (normalized === "UK") return "United Kingdom";
+  if (COUNTRY_NAME_BY_CODE[normalized]) return COUNTRY_NAME_BY_CODE[normalized];
+  try {
+    const label = displayNames?.of(normalized);
+    if (label && label !== normalized) return label;
+  } catch {
+    // ignore invalid region codes
+  }
+  return normalized;
+}
+
+export type CountryFacet = {
+  code: string;
+  name: string;
+};

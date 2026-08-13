@@ -11,6 +11,7 @@ export type ChannelCardData = {
   logoUrl: string | null;
   category: string;
   country: string;
+  countryName?: string | null;
   language: string | null;
   isLocal: boolean;
   isBroken?: boolean;
@@ -77,7 +78,9 @@ export function ChannelGrid({
                   <p className="truncate text-sm font-medium">{channel.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {channel.category}
-                    {channel.country ? ` · ${channel.country}` : ""}
+                    {channel.countryName || channel.country
+                      ? ` · ${channel.countryName || channel.country}`
+                      : ""}
                   </p>
                 </div>
                 {onToggleFavorite && (

@@ -11,7 +11,7 @@ import {
   type ParsedM3uChannel,
 } from "../lib/m3u";
 import {
-  COUNTRY_NAME_BY_CODE,
+  getCountryLongName,
   FTA_CATEGORIES,
   FTA_COUNTRIES,
   categoryPlaylistUrl,
@@ -54,9 +54,7 @@ async function upsertAll(items: ParsedM3uChannel[]) {
 
     const country = (item.country || "XX").toUpperCase();
     const countryName =
-      item.countryName ||
-      COUNTRY_NAME_BY_CODE[country] ||
-      (country === "LK" ? "Sri Lanka" : country);
+      item.countryName || getCountryLongName(country);
     const isLocal = country === "LK";
     const category = normalizeCategory(item.category);
     const externalId =
@@ -161,10 +159,7 @@ async function main() {
         return {
           ...ch,
           country,
-          countryName:
-            country === "LK"
-              ? "Sri Lanka"
-              : COUNTRY_NAME_BY_CODE[country] || src.countryName,
+          countryName: getCountryLongName(country),
         };
       });
       console.log(`  +${parsed.length} from ${src.label}`);

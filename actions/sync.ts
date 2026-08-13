@@ -11,7 +11,7 @@ import {
   type ParsedM3uChannel,
 } from "@/lib/m3u";
 import {
-  COUNTRY_NAME_BY_CODE,
+  getCountryLongName,
   FTA_CATEGORIES,
   FTA_COUNTRIES,
   categoryPlaylistUrl,
@@ -122,8 +122,7 @@ export async function upsertParsedChannels(
     const countryName =
       item.countryName ||
       options.defaultCountryName ||
-      COUNTRY_NAME_BY_CODE[country] ||
-      (country === "LK" ? "Sri Lanka" : country);
+      getCountryLongName(country);
     const isLocal = options.markLocal ?? country === "LK";
     const category = normalizeCategory(item.category);
     const externalId =
@@ -246,7 +245,7 @@ export async function importIptvOrgCountry(input: {
   return importM3uPlaylist({
     source: countryPlaylistUrl(code),
     defaultCountry: code.toUpperCase(),
-    defaultCountryName: COUNTRY_NAME_BY_CODE[code.toUpperCase()] || code.toUpperCase(),
+    defaultCountryName: getCountryLongName(code),
     markLocal: input.markLocal ?? code === "lk",
   });
 }
@@ -314,9 +313,7 @@ export async function importAllLocalAndFta(): Promise<ImportResult> {
           country: ch.country || meta.defaultCountry,
           countryName:
             ch.countryName ||
-            (ch.country
-              ? COUNTRY_NAME_BY_CODE[ch.country.toUpperCase()]
-              : undefined) ||
+            getCountryLongName(ch.country || meta.defaultCountry) ||
             meta.defaultCountryName,
         }));
         // Force local flag for LK

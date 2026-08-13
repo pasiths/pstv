@@ -13,8 +13,13 @@ export type WatcherChannel = ChannelCardData & {
   streamUrl: string;
 };
 
+type CountryFacet = {
+  code: string;
+  name: string;
+};
+
 type Facets = {
-  countries: string[];
+  countries: CountryFacet[];
   languages: string[];
   categories: string[];
 };
@@ -35,7 +40,7 @@ type TvWatcherProps = {
 };
 
 const DEFAULT_FACETS: Facets = {
-  countries: ["All"],
+  countries: [{ code: "All", name: "All countries" }],
   languages: ["All"],
   categories: ["All"],
 };
@@ -198,7 +203,7 @@ export function TvWatcher({
               src={active.streamUrl}
               title={active.name}
               category={active.category}
-              country={active.country}
+              country={active.countryName || active.country}
               logoUrl={active.logoUrl}
               pip={pip}
               onPipToggle={() => setPip((v) => !v)}
@@ -268,8 +273,8 @@ export function TvWatcher({
               onChange={(e) => setCountry(e.target.value)}
             >
               {facets.countries.map((c) => (
-                <option key={c} value={c}>
-                  {c === "All" ? "All countries" : c}
+                <option key={c.code} value={c.code}>
+                  {c.name}
                 </option>
               ))}
             </select>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCountryLongName } from "@/lib/iptv-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest) {
         logoUrl: true,
         category: true,
         country: true,
+        countryName: true,
         language: true,
         isLocal: true,
         isBroken: true,
@@ -77,14 +79,25 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
+  const countryFacets = countries
+    .filter((c) => c.country)
+    .map((c) => ({
+      code: c.country,
+      name: getCountryLongName(c.country),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   return NextResponse.json({
     total,
     page,
     limit,
     hasMore: skip + rows.length < total,
-    channels: rows,
+    channels: rows.map((row) => ({
+      ...row,
+      countryName: getCountryLongName(row.country),
+    })),
     facets: {
-      countries: ["All", ...countries.map((c) => c.country).filter(Boolean)],
+      countries: [{ code: "All", name: "All countries" }, ...countryFacets],
       languages: [
         "All",
         ...languages.map((l) => l.language).filter(Boolean),

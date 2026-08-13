@@ -6,6 +6,7 @@ import { ChannelGrid, type ChannelCardData } from "@/components/channels/channel
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ProgramGuide } from "@/components/channels/program-guide";
 import { recordWatch, toggleFavorite } from "@/actions/user";
 import { Search } from "lucide-react";
 import { LiveChatroom } from "@/components/chat/live-chatroom";
@@ -36,8 +37,6 @@ type TvWatcherProps = {
   facets?: Facets;
   favoriteIds?: string[];
   recentChannels?: WatcherChannel[];
-  epgTitle?: string | null;
-  epgNext?: string | null;
   userName?: string | null;
   enableChat?: boolean;
   pageSize?: number;
@@ -57,8 +56,6 @@ export function TvWatcher({
   facets = DEFAULT_FACETS,
   favoriteIds: initialFavorites = [],
   recentChannels = [],
-  epgTitle,
-  epgNext,
   userName = null,
   enableChat = true,
   pageSize = 48,
@@ -221,22 +218,11 @@ export function TvWatcher({
               pip={pip}
               onPipToggle={() => setPip((v) => !v)}
             />
-            {(epgTitle || epgNext) && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4 text-sm">
-                {epgTitle && (
-                  <p>
-                    <span className="text-muted-foreground">Now: </span>
-                    {epgTitle}
-                  </p>
-                )}
-                {epgNext && (
-                  <p className="mt-1">
-                    <span className="text-muted-foreground">Next: </span>
-                    {epgNext}
-                  </p>
-                )}
-              </div>
-            )}
+            <ProgramGuide
+              channelId={active.id}
+              channelName={active.name}
+              category={active.category}
+            />
             {enableChat && active.category === "Sports" && (
               <LiveChatroom channelName={active.name} userName={userName} />
             )}

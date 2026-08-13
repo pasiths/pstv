@@ -74,22 +74,6 @@ export default async function HomePage() {
       .filter((c) => !c.isHidden);
   }
 
-  const now = new Date();
-  const firstLocal =
-    channels.find((c) => c.isLocal && !c.isBroken) ?? channels[0];
-  let epgTitle: string | null = null;
-  let epgNext: string | null = null;
-  if (firstLocal) {
-    const entries = await prisma.epgEntry.findMany({
-      where: { channelId: firstLocal.id },
-      orderBy: { startsAt: "asc" },
-    });
-    const current = entries.find((e) => e.startsAt <= now && e.endsAt > now);
-    const upcoming = entries.find((e) => e.startsAt > now);
-    epgTitle = current?.title ?? null;
-    epgNext = upcoming?.title ?? null;
-  }
-
   const mapChannel = (c: (typeof channels)[number]) => ({
     id: c.id,
     name: c.name,
@@ -150,8 +134,6 @@ export default async function HomePage() {
           }}
           favoriteIds={favoriteIds}
           recentChannels={recentChannels.map(mapChannel)}
-          epgTitle={epgTitle}
-          epgNext={epgNext}
           userName={user?.name}
           enableChat
           pageSize={PAGE_LIMIT}

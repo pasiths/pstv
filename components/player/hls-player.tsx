@@ -18,6 +18,8 @@ import {
   Share2,
   Copy,
   Check,
+  Captions,
+  CaptionsOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -29,7 +31,21 @@ import {
   promptRemotePlayback,
   supportsAirPlay,
 } from "@/lib/cast";
+import {
+  captionModeLabel,
+  cycleCaptionMode,
+  useAutoCaptions,
+  type CaptionMode,
+} from "@/hooks/use-auto-captions";
 
+const CAPTION_MODE_KEY = "fluxtv_caption_mode";
+
+function readCaptionMode(): CaptionMode {
+  if (typeof window === "undefined") return "off";
+  const raw = window.localStorage.getItem(CAPTION_MODE_KEY);
+  if (raw === "on" || raw === "auto-en" || raw === "off") return raw;
+  return "off";
+}
 type HlsPlayerProps = {
   src: string;
   title?: string;
@@ -55,6 +71,7 @@ export function HlsPlayer({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captionConfigToastRef = useRef(false);
 
   const [ready, setReady] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -67,8 +84,27 @@ export function HlsPlayer({
   const [castAvailable, setCastAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [captionMode, setCaptionMode] = useState<CaptionMode>("off");
+  const [streamCue, setStreamCue] = useState("");
+  const [hasStreamSubs, setHasStreamSubs] = useState(false);
 
   const playSrc = useProxy ? proxiedStreamUrl(src) : src;
+  const autoCaptions = useAutoCaptions({
+    videoRef,
+    enabled: captionMode === "auto-en",
+  });
+
+  useEffect(() => {
+    setCaptionMode(readCaptionMode());
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CAPTION_MODE_KEY, captionMode);
+    } catch {
+      // ignore
+    }
+  }, [captionMode]);
 
   const bumpControls = useCallback(() => {
     setControlsVisible(true);
@@ -138,6 +174,8 @@ export function HlsPlayer({
     setError(null);
     setPlaying(false);
     setControlsVisible(true);
+    setStreamCue("");
+    setHasStreamSubs(false);
 
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => {
@@ -193,16 +231,29 @@ export function HlsPlayer({
             startLevel: -1,
             capLevelToPlayerSize: true,
             progressive: true,
+            enableWebVTT: true,
+            enableIMSC1: true,
+            enableCEA608Captions: true,
+            renderTextTracksNatively: true,
             xhrSetup: (xhr) => {
               xhr.withCredentials = false;
             },
           });
           hlsRef.current = hls;
+          hls.subtitleDisplay = false;
+          hls.subtitleTrack = -1;
           hls.loadSource(playSrc);
           hls.attachMedia(video);
 
+          const syncSubtitleTracks = () => {
+            const tracks = hls.subtitleTracks || [];
+            setHasStreamSubs(tracks.length > 0);
+          };
+
+          hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, syncSubtitleTracks);
           hls.on(Hls.Events.MANIFEST_PARSED, async (_e, data) => {
             if (cancelled) return;
+            syncSubtitleTracks();
             if (data.levels.length > 1) {
               hls.startLevel = Math.min(1, data.levels.length - 1);
             }
@@ -279,6 +330,103 @@ export function HlsPlayer({
     if (!video) return;
     video.muted = muted;
   }, [muted]);
+
+  useEffect(() => {
+    const hls = hlsRef.current;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const enableStreamSubs = captionMode === "on";
+    if (hls) {
+      const tracks = hls.subtitleTracks || [];
+      setHasStreamSubs(tracks.length > 0);
+      hls.subtitleDisplay = enableStreamSubs;
+      hls.subtitleTrack = enableStreamSubs && tracks.length > 0 ? 0 : -1;
+    }
+
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      track.mode = enableStreamSubs ? "showing" : "hidden";
+    }
+
+    if (!enableStreamSubs) setStreamCue("");
+  }, [captionMode, ready, reloadToken]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || captionMode !== "on") return;
+
+    const onCueChange = () => {
+      let active = "";
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const track = video.textTracks[i];
+        const cues = track.activeCues;
+        if (!cues?.length) continue;
+        const parts: string[] = [];
+        for (let j = 0; j < cues.length; j++) {
+          const cue = cues[j] as TextCue & { text?: string };
+          if (cue.text) parts.push(cue.text);
+        }
+        if (parts.length) {
+          active = parts.join(" ").replace(/\s+/g, " ").trim();
+          break;
+        }
+      }
+      setStreamCue(active);
+    };
+
+    for (let i = 0; i < video.textTracks.length; i++) {
+      video.textTracks[i].addEventListener("cuechange", onCueChange);
+    }
+    video.textTracks.addEventListener("addtrack", onCueChange);
+    onCueChange();
+
+    return () => {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].removeEventListener("cuechange", onCueChange);
+      }
+      video.textTracks.removeEventListener("addtrack", onCueChange);
+    };
+  }, [captionMode, ready, reloadToken, playSrc]);
+
+  useEffect(() => {
+    if (captionMode !== "auto-en") {
+      captionConfigToastRef.current = false;
+      return;
+    }
+    if (autoCaptions.configured !== false || !autoCaptions.error) return;
+    if (captionConfigToastRef.current) return;
+    captionConfigToastRef.current = true;
+    toast.error(autoCaptions.error);
+  }, [captionMode, autoCaptions.configured, autoCaptions.error]);
+
+  const captionText =
+    captionMode === "auto-en"
+      ? autoCaptions.text
+      : captionMode === "on"
+        ? streamCue
+        : "";
+
+  const toggleCaptions = () => {
+    bumpControls();
+    setCaptionMode((mode) => {
+      const next = cycleCaptionMode(mode);
+      if (next === "auto-en") {
+        toast.message("Auto English captions on", {
+          description: "Speech is translated to English every few seconds.",
+        });
+      } else if (next === "on") {
+        toast.message(
+          hasStreamSubs
+            ? "Stream captions on"
+            : "Captions on — this stream may not include subtitle tracks",
+        );
+      } else {
+        toast.message("Captions off");
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -414,12 +562,34 @@ export function HlsPlayer({
         muted={muted}
         autoPlay
         preload="auto"
+        crossOrigin="anonymous"
         disableRemotePlayback={false}
         onClick={(e) => {
           e.stopPropagation();
           void togglePlay();
         }}
       />
+
+      {(captionText || (captionMode === "auto-en" && autoCaptions.pending)) && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-[25] flex justify-center px-4 sm:bottom-24">
+          <div className="max-w-[92%] rounded-md bg-black/75 px-3 py-2 text-center text-sm leading-snug text-white shadow-lg backdrop-blur-sm sm:text-base">
+            {captionText || (
+              <span className="inline-flex items-center gap-2 text-white/70">
+                <Loader2 className="size-3.5 animate-spin" />
+                Generating English captions…
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {captionMode === "auto-en" && autoCaptions.error && (
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-[25] flex justify-center px-4">
+          <p className="max-w-lg rounded-md border border-amber-400/30 bg-amber-950/70 px-3 py-1.5 text-center text-[11px] text-amber-100">
+            {autoCaptions.error}
+          </p>
+        </div>
+      )}
 
       <div
         className={cn(
@@ -539,6 +709,20 @@ export function HlsPlayer({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <ControlButton
+              label={`${captionModeLabel(captionMode)}. Click to cycle: Off → On → Auto EN`}
+              active={captionMode !== "off"}
+              onClick={toggleCaptions}
+            >
+              {captionMode === "off" ? (
+                <CaptionsOff className="size-4" />
+              ) : (
+                <Captions className="size-4" />
+              )}
+              <span className="hidden text-[10px] font-medium tracking-wide uppercase sm:inline">
+                {captionModeLabel(captionMode)}
+              </span>
+            </ControlButton>
             <ControlButton label="Share" onClick={() => void handleShare()}>
               {copied ? <Check className="size-4" /> : <Share2 className="size-4" />}
             </ControlButton>

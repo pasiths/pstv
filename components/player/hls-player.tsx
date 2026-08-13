@@ -224,14 +224,22 @@ export function HlsPlayer({
 
   useEffect(() => {
     let cancelled = false;
+    // Chromium browsers expose Cast; show the control as soon as we know the platform.
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const chromium =
+      /Chrome|Chromium|Edg|CriOS/i.test(ua) && !/OPR|Opera|SamsungBrowser/i.test(ua);
+    if (chromium) setCastAvailable(true);
+
     void initCastContext().then((ctx) => {
-      if (cancelled || !ctx || !window.cast?.framework) return;
-      const CastState = window.cast.framework.CastState;
+      if (cancelled) return;
+      if (!ctx || !window.cast?.framework) {
+        if (!chromium) setCastAvailable(false);
+        return;
+      }
+      setCastAvailable(true);
       const onState = (e: { castState?: string }) => {
         const state = e.castState ?? ctx.getCastState();
-        const noDevices = state === CastState.NO_DEVICES_AVAILABLE;
-        setCastAvailable(!noDevices);
-        setCasting(state === CastState.CONNECTED);
+        setCasting(state === window.cast?.framework?.CastState.CONNECTED);
       };
       ctx.addEventListener(
         window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
@@ -249,58 +257,9 @@ export function HlsPlayer({
     if (!video) return;
     video.setAttribute("x-webkit-airplay", "allow");
     video.setAttribute("airplay", "allow");
-  }, []);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let cancelled = false;
-    let cancelWatch: (() => void) | undefined;
-
-    // Only show when a nearby device is available — not merely because the API exists.
-    const onAirPlay = (event: Event) => {
-      const availability = (event as Event & { availability?: string }).availability;
-      if (cancelled) return;
-      if (availability === "available") setAirPlayAvailable(true);
-      else if (availability === "not-available") setAirPlayAvailable(false);
-    };
-
-    video.addEventListener(
-      "webkitplaybacktargetavailabilitychanged",
-      onAirPlay as EventListener,
-    );
-
-    const remote = (
-      video as HTMLVideoElement & {
-        remote?: {
-          watchAvailability?: (cb: (available: boolean) => void) => Promise<number>;
-          cancelWatchAvailability?: (id?: number) => void;
-        };
-      }
-    ).remote;
-
-    if (remote?.watchAvailability) {
-      void remote
-        .watchAvailability((available) => {
-          if (!cancelled) setAirPlayAvailable(available);
-        })
-        .then((id) => {
-          cancelWatch = () => remote.cancelWatchAvailability?.(id);
-        })
-        .catch(() => {
-          // Unsupported — wait for webkit availability events instead.
-        });
-    }
-
-    return () => {
-      cancelled = true;
-      video.removeEventListener(
-        "webkitplaybacktargetavailabilitychanged",
-        onAirPlay as EventListener,
-      );
-      cancelWatch?.();
-    };
+    // Show AirPlay only when the WebKit picker exists (Safari / iOS / macOS).
+    setAirPlayAvailable(supportsAirPlay(video));
   }, [ready]);
 
   useEffect(() => {

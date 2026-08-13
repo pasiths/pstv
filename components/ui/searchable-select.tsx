@@ -99,7 +99,7 @@ export function SearchableSelect({
           </div>
           <ul
             role="listbox"
-            className="max-h-52 overflow-y-auto p-1"
+            className="fluxtv-scroll max-h-52 overflow-y-auto p-1"
           >
             {filtered.length === 0 ? (
               <li className="px-2 py-2 text-xs text-muted-foreground">

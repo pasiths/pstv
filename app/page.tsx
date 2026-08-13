@@ -8,7 +8,7 @@ import { getLanguageLongName } from "@/lib/languages";
 
 export const dynamic = "force-dynamic";
 
-const PAGE_LIMIT = 48;
+const PAGE_LIMIT = 72;
 
 export default async function HomePage() {
   const user = await getCurrentUser();

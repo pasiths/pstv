@@ -50,6 +50,35 @@ const DEFAULT_FACETS: Facets = {
   categories: ["All"],
 };
 
+const LAST_CHANNEL_KEY = "fluxtv_last_channel";
+
+function readLastChannel(): WatcherChannel | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_CHANNEL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<WatcherChannel>;
+    if (
+      typeof parsed?.id === "string" &&
+      typeof parsed?.name === "string" &&
+      typeof parsed?.streamUrl === "string"
+    ) {
+      return parsed as WatcherChannel;
+    }
+  } catch {
+    // ignore corrupt storage
+  }
+  return null;
+}
+
+function writeLastChannel(channel: WatcherChannel) {
+  try {
+    window.localStorage.setItem(LAST_CHANNEL_KEY, JSON.stringify(channel));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 export function TvWatcher({
   initialChannels,
   initialTotal,
@@ -58,7 +87,7 @@ export function TvWatcher({
   recentChannels = [],
   userName = null,
   enableChat = true,
-  pageSize = 48,
+  pageSize = 72,
   localCatalog = false,
 }: TvWatcherProps) {
   const [channels, setChannels] = useState(initialChannels);
@@ -82,7 +111,9 @@ export function TvWatcher({
   const [pip, setPip] = useState(false);
   const [pending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const userPickedRef = useRef(false);
+  const restoredRef = useRef(false);
 
   const countryOptions = useMemo(
     () => facets.countries.map((c) => ({ value: c.code, label: c.name })),
@@ -92,6 +123,16 @@ export function TvWatcher({
     () => facets.languages.map((l) => ({ value: l.code, label: l.name })),
     [facets.languages],
   );
+
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = readLastChannel();
+    if (!saved) return;
+    userPickedRef.current = true;
+    setActiveId(saved.id);
+    setActiveChannel(saved);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -153,7 +194,8 @@ export function TvWatcher({
   useEffect(() => {
     if (localCatalog) return;
     const node = sentinelRef.current;
-    if (!node) return;
+    const root = listScrollRef.current;
+    if (!node || !root) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
@@ -161,7 +203,7 @@ export function TvWatcher({
           void fetchPage(page + 1, false).finally(() => setLoadingMore(false));
         }
       },
-      { rootMargin: "240px" },
+      { root, rootMargin: "320px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -185,7 +227,10 @@ export function TvWatcher({
         channels.find((c) => c.id === id) ??
         recentChannels.find((c) => c.id === id) ??
         null;
-      if (selected) setActiveChannel(selected);
+      if (selected) {
+        setActiveChannel(selected);
+        writeLastChannel(selected);
+      }
     },
     [channels, recentChannels],
   );
@@ -205,8 +250,8 @@ export function TvWatcher({
   }, []);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)]">
-      <section className="space-y-4">
+    <div className="grid gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,1.05fr)] xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
+      <section className="min-w-0 space-y-3 sm:space-y-4">
         {active ? (
           <>
             <HlsPlayer
@@ -238,7 +283,7 @@ export function TvWatcher({
             <h2 className="text-sm font-medium text-muted-foreground">
               Recently watched
             </h2>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="fluxtv-scroll flex gap-2 overflow-x-auto pb-1">
               {recentChannels.map((ch) => (
                 <button
                   key={ch.id}
@@ -254,8 +299,8 @@ export function TvWatcher({
         )}
       </section>
 
-      <aside className="space-y-4">
-        <div className="space-y-3 rounded-xl border border-border/60 bg-card/30 p-3">
+      <aside className="flex min-h-0 flex-col gap-3 sm:gap-4 lg:sticky lg:top-4 lg:h-[calc(100dvh-5.5rem)]">
+        <div className="shrink-0 space-y-2.5 rounded-xl border border-border/60 bg-card/30 p-2.5 sm:space-y-3 sm:p-3">
           <div className="relative">
             <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
             <Input
@@ -281,7 +326,7 @@ export function TvWatcher({
               searchPlaceholder="Search languages…"
             />
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto sm:max-h-none">
             <Badge
               variant={localOnly ? "default" : "outline"}
               className="cursor-pointer"
@@ -301,12 +346,15 @@ export function TvWatcher({
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            Showing {channels.length} of {total.toLocaleString()}
+            Showing {channels.length.toLocaleString()} of {total.toLocaleString()}
             {pending || loadingMore ? " · loading…" : ""}
           </p>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto pr-1">
+        <div
+          ref={listScrollRef}
+          className="fluxtv-scroll min-h-[58dvh] flex-1 overflow-y-auto overscroll-contain pr-1 sm:min-h-[62dvh] lg:min-h-0"
+        >
           <ChannelGrid
             channels={channels}
             activeId={active?.id}
@@ -315,7 +363,7 @@ export function TvWatcher({
             onToggleFavorite={onToggleFavorite}
             loadingMore={loadingMore}
           />
-          <div ref={sentinelRef} className="h-4" />
+          <div ref={sentinelRef} className="h-8" />
         </div>
       </aside>
     </div>

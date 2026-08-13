@@ -35,8 +35,8 @@ export function ChannelGrid({
   loadingMore,
 }: ChannelGridProps) {
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+    <div className="space-y-2 sm:space-y-3">
+      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
         {channels.map((channel) => {
           const active = channel.id === activeId;
           const favorited = favoriteIds.includes(channel.id);
@@ -53,30 +53,41 @@ export function ChannelGrid({
                 }
               }}
               className={cn(
-                "group relative flex cursor-pointer flex-col items-start gap-2 rounded-xl border p-3 text-left transition-all",
+                "group relative flex cursor-pointer flex-col items-start gap-1.5 rounded-lg border p-2 text-left transition-all sm:gap-2 sm:rounded-xl sm:p-2.5",
                 active
                   ? "border-teal-500/80 bg-teal-500/10 ring-1 ring-teal-500/40"
                   : "border-border/60 bg-card/40 hover:border-teal-500/40 hover:bg-muted/40",
               )}
             >
-              <div className="flex w-full items-start gap-2">
-                <div className="relative size-10 shrink-0 overflow-hidden rounded-lg bg-muted">
+              <div className="flex w-full items-start gap-1.5 sm:gap-2">
+                <div className="relative size-8 shrink-0 overflow-hidden rounded-md bg-muted sm:size-9 sm:rounded-lg">
                   {channel.logoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={channel.logoUrl}
                       alt=""
                       className="size-full object-cover"
+                      loading="lazy"
                     />
                   ) : (
                     <div className="flex size-full items-center justify-center">
-                      <Radio className="size-4 text-muted-foreground" />
+                      <Radio className="size-3.5 text-muted-foreground" />
                     </div>
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{channel.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p
+                    className="text-[13px] font-medium leading-snug text-pretty sm:text-sm"
+                    title={channel.name}
+                    style={{
+                      // Prefer a single line; wrap only when the name cannot fit.
+                      overflowWrap: "break-word",
+                      wordBreak: "normal",
+                    }}
+                  >
+                    {channel.name}
+                  </p>
+                  <p className="mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
                     {channel.category}
                     {channel.countryName || channel.country
                       ? ` · ${channel.countryName || channel.country}`
@@ -88,7 +99,7 @@ export function ChannelGrid({
                     type="button"
                     size="icon-xs"
                     variant="ghost"
-                    className="shrink-0"
+                    className="size-7 shrink-0 sm:size-8"
                     onClick={(e) => {
                       e.stopPropagation();
                       onToggleFavorite(channel.id);
@@ -105,17 +116,17 @@ export function ChannelGrid({
               </div>
               <div className="flex flex-wrap gap-1">
                 {channel.isLocal && (
-                  <Badge variant="secondary" className="text-[10px]">
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[9px] sm:text-[10px]">
                     Local
                   </Badge>
                 )}
                 {active && (
-                  <Badge className="bg-teal-600 text-[10px] text-white hover:bg-teal-600">
+                  <Badge className="bg-teal-600 px-1.5 py-0 text-[9px] text-white hover:bg-teal-600 sm:text-[10px]">
                     Live
                   </Badge>
                 )}
                 {channel.isBroken && (
-                  <Badge variant="destructive" className="text-[10px]">
+                  <Badge variant="destructive" className="px-1.5 py-0 text-[9px] sm:text-[10px]">
                     Broken
                   </Badge>
                 )}

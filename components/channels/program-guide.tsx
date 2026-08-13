@@ -162,7 +162,7 @@ export function ProgramGuide({ channelId, channelName }: ProgramGuideProps) {
         <div className="px-2 py-2">
           <ul
             className={cn(
-              "space-y-0.5",
+              "fluxtv-scroll space-y-0.5",
               expanded && "max-h-72 overflow-y-auto pr-1",
             )}
           >

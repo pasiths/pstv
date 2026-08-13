@@ -1,9 +1,11 @@
 import "dotenv/config";
-import { Pool, type ConnectionOptions } from "pg";
+import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
 
-function resolveSsl(connectionString: string | undefined): boolean | ConnectionOptions {
+type PgSsl = boolean | { rejectUnauthorized: boolean; ca?: string };
+
+function resolveSsl(connectionString: string | undefined): PgSsl {
   const caCert = process.env.DATABASE_CA?.replace(/\\n/g, "\n").trim();
   const url = connectionString ?? "";
   const urlWantsSsl =

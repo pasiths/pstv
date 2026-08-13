@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PSTV">
+  <rect width="64" height="64" rx="14" fill="#0b0f14"/>
+  <rect x="8" y="8" width="48" height="48" rx="12" fill="#0d9488"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">PS</text>
+</svg>

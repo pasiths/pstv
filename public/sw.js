@@ -1,5 +1,13 @@
-const CACHE = "pstv-shell-v1";
-const PRECACHE = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE = "pstv-shell-v2";
+const PRECACHE = [
+  "/",
+  "/manifest.webmanifest",
+  "/favicon.ico",
+  "/og.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

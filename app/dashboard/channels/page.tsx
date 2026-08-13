@@ -38,6 +38,7 @@ export default async function ChannelsAdminPage() {
             language: c.language,
             category: c.category,
             isLocal: c.isLocal,
+            isPremium: c.isPremium,
             isHidden: c.isHidden,
             isBroken: c.isBroken,
           }))}

@@ -3,13 +3,17 @@ import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { SiteHeader } from "@/components/layout/site-header";
 import { canAccessAdmin } from "@/lib/permissions";
+import { canAccessPremium, mapPublicChannel } from "@/lib/premium";
 import { TvWatcher } from "@/components/channels/tv-watcher";
+import { getCountryLongName } from "@/lib/iptv-catalog";
 
 export const dynamic = "force-dynamic";
 
 export default async function FavoritesPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+
+  const entitled = canAccessPremium(user);
 
   const favorites = await prisma.favorite.findMany({
     where: { userId: user.id },
@@ -20,17 +24,24 @@ export default async function FavoritesPage() {
   const channels = favorites
     .map((f) => f.channel)
     .filter((c) => !c.isHidden)
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      logoUrl: c.logoUrl,
-      category: c.category,
-      country: c.country,
-      language: c.language,
-      isLocal: c.isLocal,
-      isBroken: c.isBroken,
-      streamUrl: c.streamUrl,
-    }));
+    .map((c) =>
+      mapPublicChannel(
+        {
+          id: c.id,
+          name: c.name,
+          logoUrl: c.logoUrl,
+          category: c.category,
+          country: c.country,
+          countryName: getCountryLongName(c.country),
+          language: c.language,
+          isLocal: c.isLocal,
+          isPremium: c.isPremium,
+          isBroken: c.isBroken,
+          streamUrl: c.streamUrl,
+        },
+        entitled,
+      ),
+    );
 
   return (
     <div className="min-h-screen">
@@ -49,6 +60,7 @@ export default async function FavoritesPage() {
           initialChannels={channels}
           initialTotal={channels.length}
           favoriteIds={channels.map((c) => c.id)}
+          hasPremium={entitled}
           localCatalog
         />
       </main>

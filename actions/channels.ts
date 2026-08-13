@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { hasPermission } from "@/lib/permissions";
 import { generateSlug } from "@/lib/utils";
+import { repairStreamUrl } from "@/lib/stream-health";
 import { revalidatePath } from "next/cache";
 
 export type ChannelInput = {
@@ -15,6 +16,7 @@ export type ChannelInput = {
   language?: string;
   category?: string;
   isLocal?: boolean;
+  isPremium?: boolean;
   isHidden?: boolean;
 };
 
@@ -55,6 +57,7 @@ export async function createChannel(input: ChannelInput): Promise<ActionResult> 
         language: input.language?.trim() || null,
         category: input.category?.trim() || "General",
         isLocal: input.isLocal ?? false,
+        isPremium: input.isPremium ?? false,
         isHidden: input.isHidden ?? false,
       },
     });
@@ -85,6 +88,7 @@ export async function updateChannel(
         language: input.language?.trim() || null,
         category: input.category?.trim() || "General",
         isLocal: input.isLocal ?? false,
+        isPremium: input.isPremium ?? false,
         isHidden: input.isHidden ?? false,
       },
     });
@@ -128,43 +132,103 @@ export async function toggleChannelHidden(id: string): Promise<ActionResult> {
   }
 }
 
-export async function checkBrokenLinks(): Promise<ActionResult & { broken?: number }> {
+/**
+ * Probe visible channels, auto-swap dead URLs with working iptv-org alternates,
+ * and mark remaining failures as broken (Not working).
+ */
+export async function checkBrokenLinks(): Promise<
+  ActionResult & { broken?: number; repaired?: number; checked?: number }
+> {
   try {
     await requireChannelPermission("channels-index");
+
+    // Prefer stale / never-checked first; cap per run so the request can finish.
     const channels = await prisma.channel.findMany({
       where: { isHidden: false },
-      select: { id: true, streamUrl: true },
+      select: {
+        id: true,
+        streamUrl: true,
+        externalId: true,
+        lastCheckedAt: true,
+      },
+      orderBy: [{ lastCheckedAt: "asc" }, { updatedAt: "asc" }],
+      take: 120,
     });
 
     let broken = 0;
+    let repaired = 0;
+
     for (const channel of channels) {
-      let isBroken = false;
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const res = await fetch(channel.streamUrl, {
-          method: "GET",
-          signal: controller.signal,
-          headers: { Range: "bytes=0-64" },
-        });
-        clearTimeout(timeout);
-        isBroken = !(res.ok || res.status === 206);
-      } catch {
-        isBroken = true;
-      }
+      const result = await repairStreamUrl({
+        streamUrl: channel.streamUrl,
+        externalId: channel.externalId,
+      });
 
       await prisma.channel.update({
         where: { id: channel.id },
-        data: { isBroken, lastCheckedAt: new Date() },
+        data: {
+          streamUrl: result.url,
+          isBroken: !result.working,
+          lastCheckedAt: new Date(),
+        },
       });
-      if (isBroken) broken += 1;
+
+      if (result.repaired) repaired += 1;
+      if (!result.working) broken += 1;
     }
 
+    revalidatePath("/");
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/channels");
-    return { success: true, broken };
+    return {
+      success: true,
+      checked: channels.length,
+      broken,
+      repaired,
+    };
   } catch (e) {
     console.error(e);
     return { success: false, error: "Link check failed." };
+  }
+}
+
+/** Mark a batch of international Sports/Movies as Paid (locked) for freemium. */
+export async function tagPremiumSamples(
+  limit = 80,
+): Promise<ActionResult & { tagged?: number }> {
+  try {
+    await requireChannelPermission("channels-edit", "channels-index");
+
+    // Keep all local channels free.
+    await prisma.channel.updateMany({
+      where: { isLocal: true },
+      data: { isPremium: false },
+    });
+
+    const candidates = await prisma.channel.findMany({
+      where: {
+        isHidden: false,
+        isLocal: false,
+        isPremium: false,
+        category: { in: ["Sports", "Movies", "Entertainment"] },
+      },
+      orderBy: { name: "asc" },
+      take: limit,
+      select: { id: true },
+    });
+
+    if (candidates.length) {
+      await prisma.channel.updateMany({
+        where: { id: { in: candidates.map((c) => c.id) } },
+        data: { isPremium: true },
+      });
+    }
+
+    revalidatePath("/");
+    revalidatePath("/dashboard/channels");
+    return { success: true, tagged: candidates.length };
+  } catch (e) {
+    console.error(e);
+    return { success: false, error: "Failed to tag premium channels." };
   }
 }

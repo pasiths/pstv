@@ -76,6 +76,7 @@ export async function getCurrentUser() {
           image: true,
           inactive: true,
           suspended: true,
+          isPremium: true,
           roles: {
             select: {
               role: {

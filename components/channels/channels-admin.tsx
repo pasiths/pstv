@@ -24,6 +24,7 @@ type AdminChannel = {
   language: string | null;
   category: string;
   isLocal: boolean;
+  isPremium: boolean;
   isHidden: boolean;
   isBroken: boolean;
 };
@@ -37,6 +38,7 @@ const emptyForm = {
   language: "si",
   category: "General",
   isLocal: true,
+  isPremium: false,
 };
 
 export function ChannelsAdmin({ channels }: { channels: AdminChannel[] }) {
@@ -76,118 +78,144 @@ export function ChannelsAdmin({ channels }: { channels: AdminChannel[] }) {
         </Button>
       </div>
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-      <form
-        onSubmit={onSubmit}
-        className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-4"
-      >
-        <h2 className="font-medium">
-          {editingId ? "Edit channel" : "Add channel"}
-        </h2>
-        {(
-          [
-            ["name", "Name"],
-            ["streamUrl", "Stream URL (m3u8)"],
-            ["logoUrl", "Logo URL"],
-            ["country", "Country code"],
-            ["countryName", "Country name"],
-            ["language", "Language"],
-            ["category", "Category"],
-          ] as const
-        ).map(([key, label]) => (
-          <div key={key} className="space-y-1">
-            <Label htmlFor={key}>{label}</Label>
-            <Input
-              id={key}
-              value={form[key]}
-              onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-              required={key === "name" || key === "streamUrl"}
+        <form
+          onSubmit={onSubmit}
+          className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-4"
+        >
+          <h2 className="font-medium">
+            {editingId ? "Edit channel" : "Add channel"}
+          </h2>
+          {(
+            [
+              ["name", "Name"],
+              ["streamUrl", "Stream URL (m3u8)"],
+              ["logoUrl", "Logo URL"],
+              ["country", "Country code"],
+              ["countryName", "Country name"],
+              ["language", "Language"],
+              ["category", "Category"],
+            ] as const
+          ).map(([key, label]) => (
+            <div key={key} className="space-y-1">
+              <Label htmlFor={key}>{label}</Label>
+              <Input
+                id={key}
+                value={form[key]}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, [key]: e.target.value }))
+                }
+                required={key === "name" || key === "streamUrl"}
+              />
+            </div>
+          ))}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isLocal}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, isLocal: e.target.checked }))
+              }
             />
-          </div>
-        ))}
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.isLocal}
-            onChange={(e) => setForm((f) => ({ ...f, isLocal: e.target.checked }))}
-          />
-          Local channel
-        </label>
-        <div className="flex gap-2">
-          <Button type="submit" disabled={pending}>
-            {editingId ? "Save" : "Create"}
-          </Button>
-          {editingId && (
-            <Button type="button" variant="outline" onClick={reset}>
-              Cancel
+            Local channel
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isPremium}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, isPremium: e.target.checked }))
+              }
+            />
+            Paid / premium (locked for free users)
+          </label>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={pending}>
+              {editingId ? "Save" : "Create"}
             </Button>
-          )}
-        </div>
-      </form>
-
-      <div className="space-y-2">
-        {channels.map((ch) => (
-          <div
-            key={ch.id}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/30 p-3"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium">{ch.name}</p>
-                {ch.isLocal && <Badge variant="secondary">Local</Badge>}
-                {ch.isHidden && <Badge variant="outline">Hidden</Badge>}
-                {ch.isBroken && <Badge variant="destructive">Broken</Badge>}
-              </div>
-              <p className="truncate text-xs text-muted-foreground">{ch.streamUrl}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setEditingId(ch.id);
-                  setForm({
-                    name: ch.name,
-                    streamUrl: ch.streamUrl,
-                    logoUrl: ch.logoUrl ?? "",
-                    country: ch.country,
-                    countryName: ch.countryName ?? "",
-                    language: ch.language ?? "",
-                    category: ch.category,
-                    isLocal: ch.isLocal,
-                  });
-                }}
-              >
-                Edit
+            {editingId && (
+              <Button type="button" variant="outline" onClick={reset}>
+                Cancel
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  startTransition(async () => {
-                    await toggleChannelHidden(ch.id);
-                    toast.success(ch.isHidden ? "Shown" : "Hidden");
-                  })
-                }
-              >
-                {ch.isHidden ? "Show" : "Hide"}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() =>
-                  startTransition(async () => {
-                    await deleteChannel(ch.id);
-                    toast.success("Deleted");
-                  })
-                }
-              >
-                Delete
-              </Button>
-            </div>
+            )}
           </div>
-        ))}
+        </form>
+
+        <div className="space-y-2">
+          {channels.map((ch) => (
+            <div
+              key={ch.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/30 p-3"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{ch.name}</p>
+                  {ch.isLocal && <Badge variant="secondary">Local</Badge>}
+                  {ch.isPremium ? (
+                    <Badge className="bg-amber-600 text-white hover:bg-amber-600">
+                      Paid
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Free</Badge>
+                  )}
+                  {ch.isHidden && <Badge variant="outline">Hidden</Badge>}
+                  {ch.isBroken && (
+                    <Badge variant="destructive">Not working</Badge>
+                  )}
+                </div>
+                <p className="truncate text-xs text-muted-foreground">
+                  {ch.streamUrl}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(ch.id);
+                    setForm({
+                      name: ch.name,
+                      streamUrl: ch.streamUrl,
+                      logoUrl: ch.logoUrl ?? "",
+                      country: ch.country,
+                      countryName: ch.countryName ?? "",
+                      language: ch.language ?? "",
+                      category: ch.category,
+                      isLocal: ch.isLocal,
+                      isPremium: ch.isPremium,
+                    });
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    startTransition(async () => {
+                      await toggleChannelHidden(ch.id);
+                      toast.success(ch.isHidden ? "Shown" : "Hidden");
+                    })
+                  }
+                >
+                  {ch.isHidden ? "Show" : "Hide"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    startTransition(async () => {
+                      await deleteChannel(ch.id);
+                      toast.success("Deleted");
+                    })
+                  }
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
     </div>
   );
 }

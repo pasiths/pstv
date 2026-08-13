@@ -22,6 +22,8 @@ model User {
   suspended   Boolean   @default(false)
   suspendedAt DateTime? @map("suspended_at")
   image       String?
+  /** Unlocks paid/premium channels when true. */
+  isPremium   Boolean   @default(false) @map("is_premium")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -140,6 +142,8 @@ model Channel {
   language    String?
   category    String   @default("General")
   isLocal     Boolean  @default(false) @map("is_local")
+  /** Paid / premium channel — locked unless the viewer has premium access. */
+  isPremium   Boolean  @default(false) @map("is_premium")
   isHidden    Boolean  @default(false) @map("is_hidden")
   isBroken    Boolean  @default(false) @map("is_broken")
   lastCheckedAt DateTime? @map("last_checked_at")
@@ -156,6 +160,7 @@ model Channel {
   @@index([language])
   @@index([category])
   @@index([isLocal, isHidden])
+  @@index([isPremium, isHidden])
   @@index([name])
   @@map("channel")
 }

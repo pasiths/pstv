@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Heart, Radio } from "lucide-react";
+import { Heart, Lock, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export type ChannelCardData = {
@@ -14,6 +14,8 @@ export type ChannelCardData = {
   countryName?: string | null;
   language: string | null;
   isLocal: boolean;
+  isPremium?: boolean;
+  locked?: boolean;
   isBroken?: boolean;
 };
 
@@ -40,6 +42,7 @@ export function ChannelGrid({
         {channels.map((channel) => {
           const active = channel.id === activeId;
           const favorited = favoriteIds.includes(channel.id);
+          const locked = Boolean(channel.locked);
           return (
             <div
               key={channel.id}
@@ -57,6 +60,7 @@ export function ChannelGrid({
                 active
                   ? "border-teal-500/80 bg-teal-500/10 ring-1 ring-teal-500/40"
                   : "border-border/60 bg-card/40 hover:border-teal-500/40 hover:bg-muted/40",
+                locked && "opacity-95",
               )}
             >
               <div className="flex w-full items-start gap-1.5 sm:gap-2">
@@ -74,13 +78,17 @@ export function ChannelGrid({
                       <Radio className="size-3.5 text-muted-foreground" />
                     </div>
                   )}
+                  {locked && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+                      <Lock className="size-3.5 text-amber-200" />
+                    </div>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p
                     className="text-[13px] font-medium leading-snug text-pretty sm:text-sm"
                     title={channel.name}
                     style={{
-                      // Prefer a single line; wrap only when the name cannot fit.
                       overflowWrap: "break-word",
                       wordBreak: "normal",
                     }}
@@ -120,14 +128,31 @@ export function ChannelGrid({
                     Local
                   </Badge>
                 )}
-                {active && (
+                {channel.isPremium ? (
+                  <Badge className="bg-amber-600/90 px-1.5 py-0 text-[9px] text-white hover:bg-amber-600/90 sm:text-[10px]">
+                    Paid
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="px-1.5 py-0 text-[9px] sm:text-[10px]">
+                    Free
+                  </Badge>
+                )}
+                {active && !locked && (
                   <Badge className="bg-teal-600 px-1.5 py-0 text-[9px] text-white hover:bg-teal-600 sm:text-[10px]">
                     Live
                   </Badge>
                 )}
+                {locked && (
+                  <Badge
+                    variant="outline"
+                    className="border-amber-400/40 px-1.5 py-0 text-[9px] text-amber-200 sm:text-[10px]"
+                  >
+                    Locked
+                  </Badge>
+                )}
                 {channel.isBroken && (
                   <Badge variant="destructive" className="px-1.5 py-0 text-[9px] sm:text-[10px]">
-                    Broken
+                    Not working
                   </Badge>
                 )}
               </div>

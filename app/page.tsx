@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { canAccessAdmin } from "@/lib/permissions";
+import { canAccessPremium, mapPublicChannel } from "@/lib/premium";
 import { SiteHeader } from "@/components/layout/site-header";
 import { TvWatcher } from "@/components/channels/tv-watcher";
 import { getCountryLongName } from "@/lib/iptv-catalog";
@@ -12,45 +13,57 @@ const PAGE_LIMIT = 72;
 
 export default async function HomePage() {
   const user = await getCurrentUser();
+  const entitled = canAccessPremium(user);
 
   const where = { isHidden: false };
 
-  const [total, channels, countries, languages, categories, localCount] =
-    await Promise.all([
-      prisma.channel.count({ where }),
-      prisma.channel.findMany({
-        where,
-        orderBy: [
-          { isLocal: "desc" },
-          { isBroken: "asc" },
-          { sortOrder: "asc" },
-          { name: "asc" },
-        ],
-        take: PAGE_LIMIT,
-      }),
-      prisma.channel.findMany({
-        where,
-        distinct: ["country"],
-        select: { country: true },
-        orderBy: { country: "asc" },
-        take: 300,
-      }),
-      prisma.channel.findMany({
-        where: { ...where, language: { not: null } },
-        distinct: ["language"],
-        select: { language: true },
-        orderBy: { language: "asc" },
-        take: 200,
-      }),
-      prisma.channel.findMany({
-        where,
-        distinct: ["category"],
-        select: { category: true },
-        orderBy: { category: "asc" },
-        take: 100,
-      }),
-      prisma.channel.count({ where: { isHidden: false, isLocal: true } }),
-    ]);
+  const [
+    total,
+    channels,
+    countries,
+    languages,
+    categories,
+    localCount,
+    freeCount,
+    paidCount,
+  ] = await Promise.all([
+    prisma.channel.count({ where }),
+    prisma.channel.findMany({
+      where,
+      orderBy: [
+        { isLocal: "desc" },
+        { isBroken: "asc" },
+        { isPremium: "asc" },
+        { sortOrder: "asc" },
+        { name: "asc" },
+      ],
+      take: PAGE_LIMIT,
+    }),
+    prisma.channel.findMany({
+      where,
+      distinct: ["country"],
+      select: { country: true },
+      orderBy: { country: "asc" },
+      take: 300,
+    }),
+    prisma.channel.findMany({
+      where: { ...where, language: { not: null } },
+      distinct: ["language"],
+      select: { language: true },
+      orderBy: { language: "asc" },
+      take: 200,
+    }),
+    prisma.channel.findMany({
+      where,
+      distinct: ["category"],
+      select: { category: true },
+      orderBy: { category: "asc" },
+      take: 100,
+    }),
+    prisma.channel.count({ where: { isHidden: false, isLocal: true } }),
+    prisma.channel.count({ where: { isHidden: false, isPremium: false } }),
+    prisma.channel.count({ where: { isHidden: false, isPremium: true } }),
+  ]);
 
   let favoriteIds: string[] = [];
   let recentChannels: typeof channels = [];
@@ -69,23 +82,26 @@ export default async function HomePage() {
       }),
     ]);
     favoriteIds = favorites.map((f) => f.channelId);
-    recentChannels = history
-      .map((h) => h.channel)
-      .filter((c) => !c.isHidden);
+    recentChannels = history.map((h) => h.channel).filter((c) => !c.isHidden);
   }
 
-  const mapChannel = (c: (typeof channels)[number]) => ({
-    id: c.id,
-    name: c.name,
-    logoUrl: c.logoUrl,
-    category: c.category,
-    country: c.country,
-    countryName: getCountryLongName(c.country),
-    language: c.language,
-    isLocal: c.isLocal,
-    isBroken: c.isBroken,
-    streamUrl: c.streamUrl,
-  });
+  const mapChannel = (c: (typeof channels)[number]) =>
+    mapPublicChannel(
+      {
+        id: c.id,
+        name: c.name,
+        logoUrl: c.logoUrl,
+        category: c.category,
+        country: c.country,
+        countryName: getCountryLongName(c.country),
+        language: c.language,
+        isLocal: c.isLocal,
+        isPremium: c.isPremium,
+        isBroken: c.isBroken,
+        streamUrl: c.streamUrl,
+      },
+      entitled,
+    );
 
   const countryFacets = countries
     .filter((c) => c.country)
@@ -104,14 +120,15 @@ export default async function HomePage() {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         <div className="mb-6">
           <p className="text-xs font-medium tracking-[0.2em] text-teal-500 uppercase">
-            Free live television
+            Free & paid live television
           </p>
           <h1 className="font-heading mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
             FluxTV
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            {localCount} local LK channels and {total.toLocaleString()} free-to-air
-            streams worldwide. Search, filter by country/category, and cast to TV.
+            {localCount.toLocaleString()} local LK · {freeCount.toLocaleString()} free ·{" "}
+            {paidCount.toLocaleString()} paid · {total.toLocaleString()} total.
+            Paid channels stay locked until your account has premium access.
           </p>
         </div>
         <TvWatcher
@@ -130,11 +147,17 @@ export default async function HomePage() {
                 }))
                 .sort((a, b) => a.name.localeCompare(b.name)),
             ],
-            categories: ["All", ...categories.map((c) => c.category)],
+            categories: [
+              "All",
+              "Free",
+              "Paid",
+              ...categories.map((c) => c.category),
+            ],
           }}
           favoriteIds={favoriteIds}
           recentChannels={recentChannels.map(mapChannel)}
           userName={user?.name}
+          hasPremium={entitled}
           enableChat
           pageSize={PAGE_LIMIT}
         />

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCountryLongName } from "@/lib/iptv-catalog";
 import { getLanguageLongName } from "@/lib/languages";
+import { getCurrentUser } from "@/lib/session";
+import { canAccessPremium, mapPublicChannel } from "@/lib/premium";
 
 export const dynamic = "force-dynamic";
 
@@ -11,17 +13,25 @@ export async function GET(request: NextRequest) {
   const country = searchParams.get("country") || "All";
   const language = searchParams.get("language") || "All";
   const category = searchParams.get("category") || "All";
+  const access = (searchParams.get("access") || "All").toLowerCase();
   const localOnly = searchParams.get("local") === "1";
   const page = Math.max(1, Number(searchParams.get("page") || 1));
   const limit = Math.min(100, Math.max(12, Number(searchParams.get("limit") || 48)));
   const skip = (page - 1) * limit;
+
+  const user = await getCurrentUser();
+  const entitled = canAccessPremium(user);
 
   const where = {
     isHidden: false,
     ...(localOnly ? { isLocal: true } : {}),
     ...(country !== "All" ? { country } : {}),
     ...(language !== "All" ? { language } : {}),
-    ...(category !== "All" ? { category } : {}),
+    ...(category !== "All" && category !== "Free" && category !== "Paid"
+      ? { category }
+      : {}),
+    ...(access === "free" || category === "Free" ? { isPremium: false } : {}),
+    ...(access === "paid" || category === "Paid" ? { isPremium: true } : {}),
     ...(q
       ? {
           OR: [
@@ -40,6 +50,7 @@ export async function GET(request: NextRequest) {
       orderBy: [
         { isLocal: "desc" },
         { isBroken: "asc" },
+        { isPremium: "asc" },
         { sortOrder: "asc" },
         { name: "asc" },
       ],
@@ -54,6 +65,7 @@ export async function GET(request: NextRequest) {
         countryName: true,
         language: true,
         isLocal: true,
+        isPremium: true,
         isBroken: true,
         streamUrl: true,
       },
@@ -103,15 +115,23 @@ export async function GET(request: NextRequest) {
     page,
     limit,
     hasMore: skip + rows.length < total,
-    channels: rows.map((row) => ({
-      ...row,
-      countryName: getCountryLongName(row.country),
-    })),
+    entitled,
+    channels: rows.map((row) =>
+      mapPublicChannel(
+        {
+          ...row,
+          countryName: getCountryLongName(row.country),
+        },
+        entitled,
+      ),
+    ),
     facets: {
       countries: [{ code: "All", name: "All countries" }, ...countryFacets],
       languages: [{ code: "All", name: "All languages" }, ...languageFacets],
       categories: [
         "All",
+        "Free",
+        "Paid",
         ...categories.map((c) => c.category).filter(Boolean),
       ],
     },

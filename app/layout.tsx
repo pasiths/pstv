@@ -56,8 +56,8 @@ export default function RootLayout({
         >
           {children}
           <PwaRegister />
+          <Toaster richColors position="top-center" />
         </ThemeProvider>
-        <Toaster richColors position="top-center" />
       </body>
     </html>
   );

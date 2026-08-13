@@ -16,6 +16,8 @@
     "tv:probe": "tsx scripts/probe-streams.ts",
     "tv:bootstrap": "tsx scripts/bootstrap-working-tv.ts",
     "tv:import-all": "tsx scripts/import-all-fta.ts",
+    "tv:repair": "tsx scripts/repair-streams.ts",
+    "tv:tag-premium": "tsx scripts/tag-premium.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

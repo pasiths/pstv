@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { checkBrokenLinks } from "@/actions/channels";
+import { checkBrokenLinks, tagPremiumSamples } from "@/actions/channels";
 import { syncInternationalChannels } from "@/actions/sync";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +15,17 @@ export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user || !canAccessAdmin(user)) redirect("/login");
 
-  const [total, local, international, hidden, broken, users] = await Promise.all([
-    prisma.channel.count(),
-    prisma.channel.count({ where: { isLocal: true } }),
-    prisma.channel.count({ where: { isLocal: false } }),
-    prisma.channel.count({ where: { isHidden: true } }),
-    prisma.channel.count({ where: { isBroken: true } }),
-    prisma.user.count(),
-  ]);
+  const [total, local, international, free, paid, hidden, broken, users] =
+    await Promise.all([
+      prisma.channel.count(),
+      prisma.channel.count({ where: { isLocal: true } }),
+      prisma.channel.count({ where: { isLocal: false } }),
+      prisma.channel.count({ where: { isPremium: false, isHidden: false } }),
+      prisma.channel.count({ where: { isPremium: true, isHidden: false } }),
+      prisma.channel.count({ where: { isHidden: true } }),
+      prisma.channel.count({ where: { isBroken: true } }),
+      prisma.user.count(),
+    ]);
 
   return (
     <div className="min-h-screen">
@@ -55,23 +58,35 @@ export default async function DashboardPage() {
             <form
               action={async () => {
                 "use server";
+                await tagPremiumSamples(80);
+              }}
+            >
+              <Button type="submit" variant="outline">
+                Tag paid samples
+              </Button>
+            </form>
+            <form
+              action={async () => {
+                "use server";
                 await checkBrokenLinks();
               }}
             >
               <Button type="submit" variant="outline">
-                Check broken links
+                Repair / check links
               </Button>
             </form>
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { label: "Total channels", value: total },
             { label: "Local (LK)", value: local },
             { label: "International", value: international },
+            { label: "Free", value: free },
+            { label: "Paid (locked)", value: paid },
             { label: "Hidden", value: hidden },
-            { label: "Broken links", value: broken },
+            { label: "Not working", value: broken },
             { label: "Users", value: users },
           ].map((stat) => (
             <Card key={stat.label} className="border-border/60 bg-card/50">

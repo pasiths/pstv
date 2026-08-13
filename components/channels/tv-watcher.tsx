@@ -8,11 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ProgramGuide } from "@/components/channels/program-guide";
 import { recordWatch, toggleFavorite } from "@/actions/user";
-import { Search } from "lucide-react";
+import { Search, Lock } from "lucide-react";
 import { LiveChatroom } from "@/components/chat/live-chatroom";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export type WatcherChannel = ChannelCardData & {
   streamUrl: string;
+  isPremium?: boolean;
+  locked?: boolean;
 };
 
 type CountryFacet = {
@@ -38,6 +42,7 @@ type TvWatcherProps = {
   favoriteIds?: string[];
   recentChannels?: WatcherChannel[];
   userName?: string | null;
+  hasPremium?: boolean;
   enableChat?: boolean;
   pageSize?: number;
   /** When true, use only provided channels (no /api/channels paging). */
@@ -86,6 +91,7 @@ export function TvWatcher({
   favoriteIds: initialFavorites = [],
   recentChannels = [],
   userName = null,
+  hasPremium = false,
   enableChat = true,
   pageSize = 72,
   localCatalog = false,
@@ -130,9 +136,13 @@ export function TvWatcher({
     const saved = readLastChannel();
     if (!saved) return;
     userPickedRef.current = true;
-    setActiveId(saved.id);
-    setActiveChannel(saved);
-  }, []);
+    const fresh =
+      initialChannels.find((c) => c.id === saved.id) ??
+      recentChannels.find((c) => c.id === saved.id) ??
+      saved;
+    setActiveId(fresh.id);
+    setActiveChannel(fresh);
+  }, [initialChannels, recentChannels]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -254,15 +264,70 @@ export function TvWatcher({
       <section className="min-w-0 space-y-3 sm:space-y-4">
         {active ? (
           <>
-            <HlsPlayer
-              src={active.streamUrl}
-              title={active.name}
-              category={active.category}
-              country={active.countryName || active.country}
-              logoUrl={active.logoUrl}
-              pip={pip}
-              onPipToggle={() => setPip((v) => !v)}
-            />
+            {active.locked ? (
+              <div className="relative flex aspect-video flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-amber-400/30 bg-[#0a0f14] px-6 text-center">
+                <div className="flex size-14 items-center justify-center rounded-full border border-amber-400/35 bg-amber-500/10">
+                  <Lock className="size-6 text-amber-200" />
+                </div>
+                <div>
+                  <p className="font-heading text-lg font-semibold text-white">
+                    {active.name}
+                  </p>
+                  <p className="mt-1 text-sm text-white/70">
+                    This is a paid channel. Unlock premium to watch.
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {hasPremium ? (
+                    <p className="text-xs text-teal-200">
+                      Premium is active — refresh if this still looks locked.
+                    </p>
+                  ) : (
+                    <>
+                      <Button asChild size="sm" className="bg-amber-600 text-white hover:bg-amber-500">
+                        <Link href="/login">Sign in for premium</Link>
+                      </Button>
+                      <Button asChild size="sm" variant="outline">
+                        <Link href="/register">Create account</Link>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : active.isBroken ? (
+              <div className="relative flex aspect-video flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border border-red-400/25 bg-[#0a0f14] px-6 text-center">
+                <p className="font-heading text-lg font-semibold text-white">
+                  {active.name}
+                </p>
+                <p className="max-w-md text-sm text-red-100/85">
+                  Not working — no live stream URL is available right now. FluxTV
+                  will auto-retry alternate links on the next health check.
+                </p>
+                {active.streamUrl ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // Allow a manual retry via remount by clearing broken flag locally.
+                      setActiveChannel({ ...active, isBroken: false });
+                    }}
+                  >
+                    Try play anyway
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <HlsPlayer
+                src={active.streamUrl}
+                title={active.name}
+                category={active.category}
+                country={active.countryName || active.country}
+                logoUrl={active.logoUrl}
+                pip={pip}
+                onPipToggle={() => setPip((v) => !v)}
+              />
+            )}
             <ProgramGuide
               channelId={active.id}
               channelName={active.name}

@@ -61,6 +61,9 @@ export function TvWatcher({
   );
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeId, setActiveId] = useState(initialChannels[0]?.id ?? null);
+  const [activeChannel, setActiveChannel] = useState<WatcherChannel | null>(
+    initialChannels[0] ?? null,
+  );
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [country, setCountry] = useState("All");
@@ -71,6 +74,7 @@ export function TvWatcher({
   const [pip, setPip] = useState(false);
   const [pending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const userPickedRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -100,10 +104,14 @@ export function TvWatcher({
       setHasMore(data.hasMore);
       setPage(data.page);
       setChannels((prev) => (replace ? data.channels : [...prev, ...data.channels]));
-      if (replace) {
-        setActiveId((current) => {
-          if (current && data.channels.some((c) => c.id === current)) return current;
-          return data.channels[0]?.id ?? null;
+      // Keep currently playing channel sticky — never auto-switch on search/filter.
+      // Only seed an initial channel if the user hasn't picked one yet.
+      if (!userPickedRef.current) {
+        setActiveChannel((current) => {
+          if (current) return current;
+          const first = data.channels[0] ?? null;
+          if (first) setActiveId(first.id);
+          return first;
         });
       }
     },
@@ -144,8 +152,7 @@ export function TvWatcher({
     return () => observer.disconnect();
   }, [fetchPage, hasMore, loadingMore, page, localCatalog]);
 
-  const active =
-    channels.find((c) => c.id === activeId) ?? channels[0] ?? null;
+  const active = activeChannel;
 
   useEffect(() => {
     if (!active?.id) return;
@@ -154,7 +161,19 @@ export function TvWatcher({
     });
   }, [active?.id]);
 
-  const onSelect = useCallback((id: string) => setActiveId(id), []);
+  const onSelect = useCallback(
+    (id: string, channel?: WatcherChannel) => {
+      userPickedRef.current = true;
+      setActiveId(id);
+      const selected =
+        channel ??
+        channels.find((c) => c.id === id) ??
+        recentChannels.find((c) => c.id === id) ??
+        null;
+      if (selected) setActiveChannel(selected);
+    },
+    [channels, recentChannels],
+  );
 
   const onToggleFavorite = useCallback((id: string) => {
     setFavorites((prev) =>
@@ -220,7 +239,7 @@ export function TvWatcher({
                 <button
                   key={ch.id}
                   type="button"
-                  onClick={() => setActiveId(ch.id)}
+                  onClick={() => onSelect(ch.id, ch)}
                   className="shrink-0 rounded-lg border border-border/60 bg-card/40 px-3 py-2 text-left text-sm hover:border-teal-500/50"
                 >
                   {ch.name}

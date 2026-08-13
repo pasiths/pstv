@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Fail fast — dead IPTV hosts should not hold Vercel functions for 20s+. */
+export const maxDuration = 15;
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
+const FETCH_TIMEOUT_MS = 8_000;
 
 function rewritePlaylist(text: string, base: URL, origin: string, referer?: string | null) {
   const refParam = referer ? `&referer=${encodeURIComponent(referer)}` : "";
@@ -46,6 +49,16 @@ function looksLikePlaylist(contentType: string, pathname: string, url: string) {
   );
 }
 
+function isTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { name?: string; code?: string; cause?: { code?: string; name?: string } };
+  if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+  if (err.code === "UND_ERR_CONNECT_TIMEOUT") return true;
+  if (err.cause?.code === "UND_ERR_CONNECT_TIMEOUT") return true;
+  if (err.cause?.name === "ConnectTimeoutError") return true;
+  return false;
+}
+
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get("url");
   if (!target) {
@@ -68,7 +81,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const upstream = await fetch(parsed.toString(), {
       signal: controller.signal,
@@ -89,7 +102,7 @@ export async function GET(request: NextRequest) {
 
     if (!upstream.ok && upstream.status !== 206) {
       return NextResponse.json(
-        { error: `Upstream ${upstream.status}` },
+        { error: `Upstream ${upstream.status}`, unreachable: true },
         { status: 502 },
       );
     }
@@ -117,7 +130,6 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      // Not a playlist after all — return as binary/text payload
       return new NextResponse(text, {
         status: upstream.status,
         headers: {
@@ -145,7 +157,22 @@ export async function GET(request: NextRequest) {
       headers,
     });
   } catch (error) {
-    console.error("[proxy]", error);
-    return NextResponse.json({ error: "Proxy fetch failed" }, { status: 502 });
+    if (isTimeoutError(error)) {
+      // Common for offline IPTV hosts — keep logs short.
+      console.warn("[proxy] timeout", parsed.host);
+      return NextResponse.json(
+        {
+          error: "Stream host timed out",
+          unreachable: true,
+          host: parsed.host,
+        },
+        { status: 504 },
+      );
+    }
+    console.warn("[proxy] failed", parsed.host, String(error));
+    return NextResponse.json(
+      { error: "Proxy fetch failed", unreachable: true, host: parsed.host },
+      { status: 502 },
+    );
   }
 }

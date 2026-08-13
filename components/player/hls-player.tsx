@@ -162,8 +162,12 @@ export function HlsPlayer({
   const [qualityOpen, setQualityOpen] = useState(false);
   const qualityPrefRef = useRef<"auto" | number>("auto");
   const [isIos, setIsIos] = useState(false);
+  /** Try CORS proxy first; fall back to direct URL if the stream host is unreachable from Vercel. */
+  const [transport, setTransport] = useState<"proxy" | "direct">("proxy");
+  const triedDirectRef = useRef(false);
 
-  const playSrc = useProxy ? proxiedStreamUrl(src) : src;
+  const shouldProxy = useProxy && transport === "proxy" && !src.startsWith("/");
+  const playSrc = shouldProxy ? proxiedStreamUrl(src) : src;
   // Same-origin files (PS Demo TV) must not use crossOrigin or Safari can block playback.
   const needsCors = !playSrc.startsWith("/") && !playSrc.startsWith("blob:");
   const autoCaptions = useAutoCaptions({
@@ -176,6 +180,12 @@ export function HlsPlayer({
     setCaptionMode(readCaptionMode());
     qualityPrefRef.current = readQualityPref();
   }, []);
+
+  useEffect(() => {
+    // Reset transport when the channel/src changes.
+    setTransport("proxy");
+    triedDirectRef.current = false;
+  }, [src]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -374,6 +384,18 @@ export function HlsPlayer({
 
     const showFatal = (message: string) => {
       if (cancelled) return;
+      // Proxy timed out / host unreachable from Vercel → try direct once.
+      if (
+        shouldProxy &&
+        !triedDirectRef.current &&
+        !isProgressiveMediaUrl(src) &&
+        !src.startsWith("/")
+      ) {
+        triedDirectRef.current = true;
+        setTransport("direct");
+        setReloadToken((n) => n + 1);
+        return;
+      }
       setError(message);
       clearBuffering();
       setReady(false);
@@ -571,7 +593,7 @@ export function HlsPlayer({
       video.removeAttribute("src");
       video.load();
     };
-  }, [playSrc, src, title, reloadToken]);
+  }, [playSrc, src, title, reloadToken, shouldProxy]);
 
   useEffect(() => {
     const video = videoRef.current;

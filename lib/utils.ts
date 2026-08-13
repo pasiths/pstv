@@ -18,5 +18,10 @@ export function generateSlug(name: string): string {
 export function proxiedStreamUrl(url: string): string {
   if (!url) return url;
   if (url.startsWith("/api/proxy")) return url;
-  return `/api/proxy?url=${encodeURIComponent(url)}`;
+  try {
+    const origin = new URL(url).origin + "/";
+    return `/api/proxy?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(origin)}`;
+  } catch {
+    return `/api/proxy?url=${encodeURIComponent(url)}`;
+  }
 }

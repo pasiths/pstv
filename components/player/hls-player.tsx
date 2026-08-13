@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { Loader2, Volume2, VolumeX } from "lucide-react";
+import { Loader2, Volume2, VolumeX, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { proxiedStreamUrl } from "@/lib/utils";
 
@@ -10,60 +10,70 @@ type HlsPlayerProps = {
   src: string;
   title?: string;
   pip?: boolean;
-  /** Force proxy. Default: try direct first, then proxy on failure. */
-  useProxy?: boolean | "auto";
+  /** Default true — IPTV streams almost always need CORS proxy. */
+  useProxy?: boolean;
 };
 
 export function HlsPlayer({
   src,
   title,
   pip = false,
-  useProxy = "auto",
+  useProxy = true,
 }: HlsPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [ready, setReady] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
-  const [proxyMode, setProxyMode] = useState(useProxy === true);
 
-  const playSrc =
-    useProxy === true || proxyMode ? proxiedStreamUrl(src) : src;
-
-  useEffect(() => {
-    setProxyMode(useProxy === true);
-  }, [src, useProxy]);
+  const playSrc = useProxy ? proxiedStreamUrl(src) : src;
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !playSrc) return;
 
     let cancelled = false;
+    let loadTimeout: ReturnType<typeof setTimeout> | null = null;
     setReady(false);
+    setBuffering(true);
     setError(null);
 
-    const fail = (message: string, canFallbackToProxy: boolean) => {
+    const onWaiting = () => setBuffering(true);
+    const onPlaying = () => {
+      setBuffering(false);
+      setReady(true);
+    };
+    const onCanPlay = () => {
+      setBuffering(false);
+      setReady(true);
+    };
+
+    video.addEventListener("waiting", onWaiting);
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("canplay", onCanPlay);
+
+    const showFatal = (message: string) => {
       if (cancelled) return;
-      if (canFallbackToProxy && useProxy === "auto" && !proxyMode) {
-        setProxyMode(true);
-        return;
-      }
       setError(message);
+      setBuffering(false);
+      setReady(false);
     };
 
     const startPlayback = async () => {
+      loadTimeout = setTimeout(() => {
+        if (!cancelled && !video.played.length) {
+          showFatal(
+            `Timed out loading${title ? ` ${title}` : ""}. Try another channel or Retry.`,
+          );
+        }
+      }, 18_000);
+
       try {
-        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari / iOS native HLS
+        if (video.canPlayType("application/vnd.apple.mpegurl") && !Hls.isSupported()) {
           video.src = playSrc;
-          video.onloadedmetadata = () => {
-            if (!cancelled) setReady(true);
-          };
-          video.onerror = () =>
-            fail(
-              `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
-              true,
-            );
           await video.play().catch(() => undefined);
           return;
         }
@@ -71,67 +81,76 @@ export function HlsPlayer({
         if (Hls.isSupported()) {
           const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
-            backBufferLength: 30,
-            startLevel: 0,
-            abrEwmaDefaultEstimate: 500_000,
+            lowLatencyMode: false,
+            backBufferLength: 60,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            startLevel: -1,
+            capLevelToPlayerSize: true,
+            progressive: true,
+            xhrSetup: (xhr) => {
+              xhr.withCredentials = false;
+            },
           });
           hlsRef.current = hls;
           hls.loadSource(playSrc);
           hls.attachMedia(video);
 
-          hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          hls.on(Hls.Events.MANIFEST_PARSED, async (_e, data) => {
             if (cancelled) return;
+            // Prefer a mid/low quality start for faster first frame
+            if (data.levels.length > 1) {
+              hls.startLevel = Math.min(1, data.levels.length - 1);
+            }
             setReady(true);
+            setBuffering(false);
             try {
               await video.play();
             } catch {
-              // muted autoplay
+              // muted autoplay should work
             }
           });
 
           hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (cancelled || !data.fatal) return;
-
-            if (
-              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-              useProxy === "auto" &&
-              !proxyMode
-            ) {
-              hls.destroy();
-              hlsRef.current = null;
-              setProxyMode(true);
+            if (cancelled) return;
+            if (!data.fatal) {
+              if (data.details === "bufferStalledError") setBuffering(true);
               return;
             }
 
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              console.warn("[HlsPlayer] network error, retrying…", data);
               hls.startLoad();
-              fail(
-                `Unable to play${title ? ` ${title}` : ""}. Network error loading stream.`,
-                false,
-              );
+              setTimeout(() => {
+                if (!cancelled && video.readyState < 2) {
+                  showFatal(
+                    `Network error${title ? ` on ${title}` : ""}. Stream may be offline or geo-blocked.`,
+                  );
+                }
+              }, 8000);
               return;
             }
 
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              console.warn("[HlsPlayer] media error, recovering…", data);
               hls.recoverMediaError();
               return;
             }
 
-            fail(
+            showFatal(
               `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
-              false,
             );
             hls.destroy();
           });
           return;
         }
 
-        fail("HLS is not supported in this browser.", false);
+        // Fallback: native tag
+        video.src = playSrc;
+        await video.play().catch(() => undefined);
       } catch {
-        fail(
+        showFatal(
           `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
-          true,
         );
       }
     };
@@ -140,6 +159,10 @@ export function HlsPlayer({
 
     return () => {
       cancelled = true;
+      if (loadTimeout) clearTimeout(loadTimeout);
+      video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("canplay", onCanPlay);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -147,7 +170,7 @@ export function HlsPlayer({
       video.removeAttribute("src");
       video.load();
     };
-  }, [playSrc, title, reloadToken, proxyMode, useProxy]);
+  }, [playSrc, title, reloadToken]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -169,13 +192,16 @@ export function HlsPlayer({
 
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/60 bg-black shadow-lg">
-      {!ready && !error && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 text-muted-foreground">
+      {(!ready || buffering) && !error && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/55 text-muted-foreground">
           <Loader2 className="size-8 animate-spin text-teal-400" />
+          <p className="text-xs">
+            {ready ? "Buffering…" : `Loading${title ? ` ${title}` : ""}…`}
+          </p>
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 px-6 text-center text-sm text-red-300">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/85 px-6 text-center text-sm text-red-300">
           <p>{error}</p>
           <Button
             type="button"
@@ -184,10 +210,11 @@ export function HlsPlayer({
             onClick={() => {
               setError(null);
               setReady(false);
-              setProxyMode(useProxy === true);
+              setBuffering(true);
               setReloadToken((n) => n + 1);
             }}
           >
+            <RefreshCw className="size-3.5" />
             Retry
           </Button>
         </div>
@@ -199,8 +226,9 @@ export function HlsPlayer({
         playsInline
         muted={muted}
         autoPlay
+        preload="auto"
       />
-      <div className="absolute top-3 right-3 z-20">
+      <div className="absolute top-3 right-3 z-20 flex gap-2">
         <Button
           type="button"
           size="sm"

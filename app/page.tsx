@@ -10,12 +10,23 @@ export default async function HomePage() {
   const user = await getCurrentUser();
 
   const channels = await prisma.channel.findMany({
-    where: { isHidden: false },
+    where: { isHidden: false, isBroken: false },
     orderBy: [{ isLocal: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
   });
 
+  // If everything is marked broken, still show something
+  const fallbackChannels =
+    channels.length > 0
+      ? channels
+      : await prisma.channel.findMany({
+          where: { isHidden: false },
+          orderBy: [{ isLocal: "desc" }, { sortOrder: "asc" }],
+        });
+
+  const displayChannels = fallbackChannels;
+
   let favoriteIds: string[] = [];
-  let recentChannels: typeof channels = [];
+  let recentChannels: typeof displayChannels = [];
 
   if (user) {
     const [favorites, history] = await Promise.all([
@@ -33,11 +44,11 @@ export default async function HomePage() {
     favoriteIds = favorites.map((f) => f.channelId);
     recentChannels = history
       .map((h) => h.channel)
-      .filter((c) => !c.isHidden);
+      .filter((c) => !c.isHidden && !c.isBroken);
   }
 
   const now = new Date();
-  const firstLocal = channels.find((c) => c.isLocal);
+  const firstLocal = displayChannels.find((c) => c.isLocal && !c.isBroken) ?? displayChannels[0];
   let epgTitle: string | null = null;
   let epgNext: string | null = null;
   if (firstLocal) {
@@ -51,7 +62,7 @@ export default async function HomePage() {
     epgNext = upcoming?.title ?? null;
   }
 
-  const mapped = channels.map((c) => ({
+  const mapped = displayChannels.map((c) => ({
     id: c.id,
     name: c.name,
     logoUrl: c.logoUrl,

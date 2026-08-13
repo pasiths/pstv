@@ -8,6 +8,7 @@ import { TvWatcher } from "@/components/channels/tv-watcher";
 import { getCountryLongName } from "@/lib/iptv-catalog";
 import { getLanguageLongName } from "@/lib/languages";
 import { SITE } from "@/lib/site";
+import { withPsDemoFirst } from "@/lib/ps-demo";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,7 @@ export default async function HomePage() {
       {
         id: c.id,
         name: c.name,
+        slug: c.slug,
         logoUrl: c.logoUrl,
         category: c.category,
         country: c.country,
@@ -136,8 +138,8 @@ export default async function HomePage() {
           </p>
         </div>
         <TvWatcher
-          initialChannels={channels.map(mapChannel)}
-          initialTotal={total}
+          initialChannels={withPsDemoFirst(channels.map(mapChannel))}
+          initialTotal={Math.max(total, 1)}
           facets={{
             countries: [{ code: "All", name: "All countries" }, ...countryFacets],
             languages: [

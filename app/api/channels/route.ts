@@ -4,6 +4,8 @@ import { getCountryLongName } from "@/lib/iptv-catalog";
 import { getLanguageLongName } from "@/lib/languages";
 import { getCurrentUser } from "@/lib/session";
 import { canAccessPremium, mapPublicChannel } from "@/lib/premium";
+import { withPsDemoFirst } from "@/lib/ps-demo";
+import { PS_DEMO_CHANNEL } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +61,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         name: true,
+        slug: true,
         logoUrl: true,
         category: true,
         country: true,
@@ -110,21 +113,43 @@ export async function GET(request: NextRequest) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  let channels = rows.map((row) =>
+    mapPublicChannel(
+      {
+        ...row,
+        countryName: getCountryLongName(row.country),
+      },
+      entitled,
+    ),
+  );
+
+  // Keep PS Demo TV first on the default browse page (public + signed-in).
+  const showDemo =
+    page === 1 &&
+    !q &&
+    country === "All" &&
+    language === "All" &&
+    category !== "Paid" &&
+    access !== "paid" &&
+    !localOnly;
+  if (showDemo) {
+    channels = withPsDemoFirst(channels);
+  } else {
+    channels = channels.filter(
+      (c) =>
+        c.streamUrl !== PS_DEMO_CHANNEL.streamUrl &&
+        (c as { slug?: string }).slug !== PS_DEMO_CHANNEL.slug &&
+        c.name !== PS_DEMO_CHANNEL.name,
+    );
+  }
+
   return NextResponse.json({
-    total,
+    total: showDemo ? Math.max(total, 1) : total,
     page,
     limit,
     hasMore: skip + rows.length < total,
     entitled,
-    channels: rows.map((row) =>
-      mapPublicChannel(
-        {
-          ...row,
-          countryName: getCountryLongName(row.country),
-        },
-        entitled,
-      ),
-    ),
+    channels,
     facets: {
       countries: [{ code: "All", name: "All countries" }, ...countryFacets],
       languages: [{ code: "All", name: "All languages" }, ...languageFacets],

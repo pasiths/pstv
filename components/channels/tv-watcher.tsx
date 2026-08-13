@@ -13,10 +13,13 @@ import { LiveChatroom } from "@/components/chat/live-chatroom";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
+import { PS_DEMO_CHANNEL } from "@/lib/utils";
+
 export type WatcherChannel = ChannelCardData & {
   streamUrl: string;
   isPremium?: boolean;
   locked?: boolean;
+  slug?: string;
 };
 
 type CountryFacet = {
@@ -104,9 +107,13 @@ export function TvWatcher({
     !localCatalog && initialChannels.length < (initialTotal ?? initialChannels.length),
   );
   const [loadingMore, setLoadingMore] = useState(false);
-  const [activeChannel, setActiveChannel] = useState<WatcherChannel | null>(
-    initialChannels[0] ?? null,
-  );
+  const [activeChannel, setActiveChannel] = useState<WatcherChannel | null>(() => {
+    const demo =
+      initialChannels.find((c) => c.slug === PS_DEMO_CHANNEL.slug) ||
+      initialChannels.find((c) => c.streamUrl === PS_DEMO_CHANNEL.streamUrl) ||
+      initialChannels.find((c) => c.name === PS_DEMO_CHANNEL.name);
+    return demo ?? initialChannels[0] ?? null;
+  });
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [country, setCountry] = useState("All");
@@ -134,13 +141,15 @@ export function TvWatcher({
     if (restoredRef.current) return;
     restoredRef.current = true;
     const saved = readLastChannel();
-    if (!saved) return;
+    if (!saved) {
+      // First visit: keep PS Demo TV (or first channel) from initial state.
+      return;
+    }
     userPickedRef.current = true;
     const fresh =
       initialChannels.find((c) => c.id === saved.id) ??
       recentChannels.find((c) => c.id === saved.id) ??
       saved;
-    // Defer so we don't sync-set during effect render (React 19 lint).
     queueMicrotask(() => {
       setActiveChannel(fresh);
     });

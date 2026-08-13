@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { cn, proxiedStreamUrl } from "@/lib/utils";
+import { cn, proxiedStreamUrl, isProgressiveMediaUrl } from "@/lib/utils";
 import {
   castHlsMedia,
   initCastContext,
@@ -315,6 +315,13 @@ export function HlsPlayer({
       }, 18_000);
 
       try {
+        // Progressive MP4/WebM (e.g. PS Demo TV) — native element, not HLS.js
+        if (isProgressiveMediaUrl(src) || isProgressiveMediaUrl(playSrc)) {
+          video.src = playSrc;
+          await video.play().catch(() => undefined);
+          return;
+        }
+
         if (
           video.canPlayType("application/vnd.apple.mpegurl") &&
           !Hls.isSupported()
@@ -457,7 +464,7 @@ export function HlsPlayer({
       video.removeAttribute("src");
       video.load();
     };
-  }, [playSrc, title, reloadToken]);
+  }, [playSrc, src, title, reloadToken]);
 
   useEffect(() => {
     const video = videoRef.current;

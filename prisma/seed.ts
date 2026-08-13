@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import * as bcrypt from "bcryptjs";
-import { generateSlug } from "@/lib/utils";
+import { generateSlug, PS_DEMO_CHANNEL } from "@/lib/utils";
 import { normalizeCategory, parseM3u } from "@/lib/m3u";
 
 const LK_PLAYLIST = "https://iptv-org.github.io/iptv/countries/lk.m3u";
@@ -159,6 +159,40 @@ async function seedAuth() {
   };
 }
 
+async function seedPsDemoChannel() {
+  const logoUrl = "/icons/icon-192.png";
+  const existing =
+    (await prisma.channel.findUnique({
+      where: { externalId: PS_DEMO_CHANNEL.externalId },
+    })) ||
+    (await prisma.channel.findUnique({ where: { slug: PS_DEMO_CHANNEL.slug } }));
+
+  const data = {
+    name: PS_DEMO_CHANNEL.name,
+    slug: PS_DEMO_CHANNEL.slug,
+    streamUrl: PS_DEMO_CHANNEL.streamUrl,
+    logoUrl,
+    country: "LK",
+    countryName: "Sri Lanka",
+    language: "en",
+    category: "Education",
+    isLocal: true,
+    isPremium: false,
+    isHidden: false,
+    isBroken: false,
+    externalId: PS_DEMO_CHANNEL.externalId,
+    sortOrder: -1000,
+  };
+
+  if (existing) {
+    await prisma.channel.update({ where: { id: existing.id }, data });
+    return { id: existing.id, created: false };
+  }
+
+  const created = await prisma.channel.create({ data });
+  return { id: created.id, created: true };
+}
+
 async function seedLocalChannels() {
   console.log("📡 Fetching Sri Lanka streams from iptv-org...");
   const playlistRes = await fetch(LK_PLAYLIST, {
@@ -303,6 +337,7 @@ async function main() {
   console.log("🌱 Seeding PSTV (safe upsert — keeps existing catalog)…");
 
   await seedAuth();
+  const demo = await seedPsDemoChannel();
   const channels = await seedLocalChannels();
 
   const [local, free, paid] = await Promise.all([
@@ -317,6 +352,9 @@ async function main() {
   console.log("   admin@fluxtv.local       (admin + premium)");
   console.log("   premium@fluxtv.local     (premium access)");
   console.log("   user@fluxtv.local        (free user)");
+  console.log(
+    `   PS Demo TV: ${demo.created ? "created" : "updated"} (${PS_DEMO_CHANNEL.streamUrl})`,
+  );
   console.log(
     `   LK playlist: ${channels.playlist} (created ${channels.created}, updated ${channels.updated})`,
   );

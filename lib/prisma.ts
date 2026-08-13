@@ -60,8 +60,9 @@ const pool =
   globalForPrisma.pool ??
   new Pool({
     connectionString: ssl ? poolConnectionString(rawUrl) : rawUrl,
+    max: Number(process.env.DATABASE_POOL_MAX || 3),
     connectionTimeoutMillis: 30_000,
-    idleTimeoutMillis: 30_000,
+    idleTimeoutMillis: 10_000,
     ssl,
   });
 

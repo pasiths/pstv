@@ -19,6 +19,7 @@ Installable as a Progressive Web App on **iPhone / iPad**, **Android**, and **Wi
 ## Features
 
 - Live **HLS** player (quality, captions, PiP, fullscreen, volume, AirPlay / Cast)
+- **PS Demo TV** first channel — education intro video (how to use; no admin detail)
 - Channel catalog with search, free / paid filters, and infinite scroll
 - Freemium access (free streams vs premium-gated channels)
 - Auth, roles, favorites, and watch history
@@ -82,6 +83,8 @@ Seed is a **safe upsert** — it does not wipe an existing catalog.
 | `npm run db:push` | Push Prisma schema |
 | `npm run db:seed` | Seed roles, users, local channels |
 | `npm run db:studio` | Prisma Studio |
+| `npm run tv:demo-video` | Regenerate PS Demo TV intro video |
+| `npm run tv:demo-channel` | Upsert PS Demo TV channel in the DB |
 | `npm run tv:import-local` | Import Sri Lanka channels (iptv-org) |
 | `npm run tv:import-all` | Broader FTA import |
 | `npm run tv:repair` | Probe and repair broken stream URLs |

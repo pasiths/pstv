@@ -36,17 +36,20 @@ export default async function DashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/dashboard/import">Import local + FTA</Link>
+            </Button>
             <Button asChild variant="outline">
-              <Link href="/dashboard/import">Import channels</Link>
+              <Link href="/dashboard/channels">Manage channels</Link>
             </Button>
             <form
               action={async () => {
                 "use server";
-                await syncInternationalChannels(150);
+                await syncInternationalChannels(400);
               }}
             >
               <Button type="submit" variant="outline">
-                Sync mixed catalog
+                Quick sync catalog
               </Button>
             </form>
             <form
@@ -59,9 +62,6 @@ export default async function DashboardPage() {
                 Check broken links
               </Button>
             </form>
-            <Button asChild>
-              <Link href="/dashboard/channels">Manage channels</Link>
-            </Button>
           </div>
         </div>
 

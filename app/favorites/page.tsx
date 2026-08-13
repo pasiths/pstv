@@ -46,9 +46,10 @@ export default async function FavoritesPage() {
           </p>
         </div>
         <TvWatcher
-          channels={channels}
+          initialChannels={channels}
+          initialTotal={channels.length}
           favoriteIds={channels.map((c) => c.id)}
-          enableFilters={false}
+          localCatalog
         />
       </main>
     </div>

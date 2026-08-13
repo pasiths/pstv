@@ -4,7 +4,19 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { hasPermission } from "@/lib/permissions";
 import { generateSlug } from "@/lib/utils";
-import { normalizeCategory, parseM3u, type ParsedM3uChannel } from "@/lib/m3u";
+import {
+  dedupeChannels,
+  normalizeCategory,
+  parseM3u,
+  type ParsedM3uChannel,
+} from "@/lib/m3u";
+import {
+  COUNTRY_NAME_BY_CODE,
+  FTA_CATEGORIES,
+  FTA_COUNTRIES,
+  categoryPlaylistUrl,
+  countryPlaylistUrl,
+} from "@/lib/iptv-catalog";
 import { revalidatePath } from "next/cache";
 
 export type ImportResult = {
@@ -14,6 +26,7 @@ export type ImportResult = {
   updated?: number;
   skipped?: number;
   total?: number;
+  sources?: number;
 };
 
 async function requireImportPermission() {
@@ -24,7 +37,28 @@ async function requireImportPermission() {
   return user;
 }
 
-async function upsertParsedChannels(
+function revalidateCatalog() {
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/channels");
+  revalidatePath("/dashboard/import");
+}
+
+async function fetchPlaylist(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "FluxTV/1.0" },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/** Fast bulk upsert using in-memory lookup maps. */
+export async function upsertParsedChannels(
   items: ParsedM3uChannel[],
   options: {
     defaultCountry?: string;
@@ -32,11 +66,47 @@ async function upsertParsedChannels(
     markLocal?: boolean;
   } = {},
 ): Promise<{ created: number; updated: number; skipped: number }> {
+  const deduped = dedupeChannels(items);
+  if (deduped.length === 0) return { created: 0, updated: 0, skipped: 0 };
+
+  const existing = await prisma.channel.findMany({
+    select: {
+      id: true,
+      externalId: true,
+      streamUrl: true,
+      slug: true,
+      logoUrl: true,
+      language: true,
+    },
+  });
+
+  const byExternal = new Map(
+    existing.filter((e) => e.externalId).map((e) => [e.externalId!, e]),
+  );
+  const byUrl = new Map(existing.map((e) => [e.streamUrl, e]));
+  const usedSlugs = new Set(existing.map((e) => e.slug));
+
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
-  for (const item of items) {
+  const toCreate: Array<{
+    name: string;
+    slug: string;
+    streamUrl: string;
+    logoUrl: string | null;
+    country: string;
+    countryName: string | null;
+    language: string | null;
+    category: string;
+    isLocal: boolean;
+    externalId: string;
+    sortOrder: number;
+  }> = [];
+
+  let sortOrder = existing.length;
+
+  for (const item of deduped) {
     const name = item.name.trim();
     const streamUrl = item.streamUrl.trim();
     if (!name || !streamUrl) {
@@ -44,38 +114,39 @@ async function upsertParsedChannels(
       continue;
     }
 
-    const country = (item.country || options.defaultCountry || "XX").toUpperCase();
+    const country = (
+      item.country ||
+      options.defaultCountry ||
+      "XX"
+    ).toUpperCase();
     const countryName =
       item.countryName ||
       options.defaultCountryName ||
+      COUNTRY_NAME_BY_CODE[country] ||
       (country === "LK" ? "Sri Lanka" : country);
     const isLocal = options.markLocal ?? country === "LK";
     const category = normalizeCategory(item.category);
     const externalId =
       item.externalId?.trim() ||
-      `m3u:${generateSlug(name)}:${Buffer.from(streamUrl).toString("base64url").slice(0, 16)}`;
+      `m3u:${generateSlug(name)}:${Buffer.from(streamUrl)
+        .toString("base64url")
+        .slice(0, 16)}`;
 
-    const existingByExternal = await prisma.channel.findUnique({
-      where: { externalId },
-    });
-    const existingByUrl =
-      existingByExternal ??
-      (await prisma.channel.findFirst({ where: { streamUrl } }));
-
-    if (existingByUrl) {
+    const found = byExternal.get(externalId) || byUrl.get(streamUrl);
+    if (found) {
       await prisma.channel.update({
-        where: { id: existingByUrl.id },
+        where: { id: found.id },
         data: {
           name,
           streamUrl,
-          logoUrl: item.logoUrl || existingByUrl.logoUrl,
+          logoUrl: item.logoUrl || found.logoUrl,
           country,
           countryName,
-          language: item.language || existingByUrl.language,
+          language: item.language || found.language,
           category,
           isLocal,
-          isBroken: false,
-          externalId: existingByUrl.externalId || externalId,
+          isHidden: false,
+          externalId: found.externalId || externalId,
         },
       });
       updated += 1;
@@ -83,31 +154,40 @@ async function upsertParsedChannels(
     }
 
     let slug = generateSlug(name);
-    if (!slug) slug = `channel-${Date.now().toString(36)}`;
-    const slugTaken = await prisma.channel.findUnique({ where: { slug } });
-    if (slugTaken) slug = `${slug}-${externalId.slice(-6).replace(/[^a-z0-9]/gi, "")}`;
+    if (!slug) slug = `channel-${Date.now().toString(36)}-${created}`;
+    if (usedSlugs.has(slug)) {
+      slug = `${slug}-${externalId.slice(-8).replace(/[^a-z0-9]/gi, "").toLowerCase() || created}`;
+    }
+    usedSlugs.add(slug);
 
-    await prisma.channel.create({
-      data: {
-        name,
-        slug,
-        streamUrl,
-        logoUrl: item.logoUrl || null,
-        country,
-        countryName,
-        language: item.language || null,
-        category,
-        isLocal,
-        externalId,
-      },
+    toCreate.push({
+      name,
+      slug,
+      streamUrl,
+      logoUrl: item.logoUrl || null,
+      country,
+      countryName,
+      language: item.language || null,
+      category,
+      isLocal,
+      externalId,
+      sortOrder: sortOrder++,
     });
     created += 1;
+  }
+
+  const chunkSize = 150;
+  for (let i = 0; i < toCreate.length; i += chunkSize) {
+    const chunk = toCreate.slice(i, i + chunkSize);
+    await prisma.channel.createMany({
+      data: chunk,
+      skipDuplicates: true,
+    });
   }
 
   return { created, updated, skipped };
 }
 
-/** Import channels from pasted M3U text or a remote M3U URL. */
 export async function importM3uPlaylist(input: {
   source: string;
   defaultCountry?: string;
@@ -122,14 +202,11 @@ export async function importM3uPlaylist(input: {
 
     let content = raw;
     if (/^https?:\/\//i.test(raw) && !raw.includes("#EXTINF")) {
-      const res = await fetch(raw, {
-        headers: { "User-Agent": "FluxTV/1.0" },
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        return { success: false, error: `Failed to download playlist (${res.status}).` };
+      const downloaded = await fetchPlaylist(raw);
+      if (!downloaded) {
+        return { success: false, error: "Failed to download playlist." };
       }
-      content = await res.text();
+      content = downloaded;
     }
 
     const parsed = parseM3u(content);
@@ -143,26 +220,20 @@ export async function importM3uPlaylist(input: {
       markLocal: input.markLocal,
     });
 
-    revalidatePath("/");
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/channels");
-    revalidatePath("/dashboard/import");
-
-    return {
-      success: true,
-      total: parsed.length,
-      ...result,
-    };
+    revalidateCatalog();
+    return { success: true, total: parsed.length, ...result };
   } catch (e) {
     console.error("[importM3uPlaylist]", e);
     return {
       success: false,
-      error: e instanceof Error && e.message === "Unauthorized" ? "Unauthorized" : "Import failed.",
+      error:
+        e instanceof Error && e.message === "Unauthorized"
+          ? "Unauthorized"
+          : "Import failed.",
     };
   }
 }
 
-/** Import from iptv-org country playlist (real streams). */
 export async function importIptvOrgCountry(input: {
   country: string;
   markLocal?: boolean;
@@ -172,16 +243,14 @@ export async function importIptvOrgCountry(input: {
     return { success: false, error: "Use a 2-letter country code (e.g. lk, us, in)." };
   }
 
-  const url = `https://iptv-org.github.io/iptv/countries/${code}.m3u`;
   return importM3uPlaylist({
-    source: url,
+    source: countryPlaylistUrl(code),
     defaultCountry: code.toUpperCase(),
-    defaultCountryName: code.toUpperCase() === "LK" ? "Sri Lanka" : code.toUpperCase(),
+    defaultCountryName: COUNTRY_NAME_BY_CODE[code.toUpperCase()] || code.toUpperCase(),
     markLocal: input.markLocal ?? code === "lk",
   });
 }
 
-/** Import popular category playlists from iptv-org. */
 export async function importIptvOrgCategory(input: {
   category: string;
   limit?: number;
@@ -189,28 +258,15 @@ export async function importIptvOrgCategory(input: {
   try {
     await requireImportPermission();
     const category = input.category.trim().toLowerCase();
-    const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
-    const url = `https://iptv-org.github.io/iptv/categories/${category}.m3u`;
-
-    const res = await fetch(url, {
-      headers: { "User-Agent": "FluxTV/1.0" },
-      cache: "no-store",
-    });
-    if (!res.ok) {
+    const limit = input.limit ? Math.min(Math.max(input.limit, 1), 5000) : undefined;
+    const content = await fetchPlaylist(categoryPlaylistUrl(category));
+    if (!content) {
       return { success: false, error: `Category playlist not found (${category}).` };
     }
 
-    const parsed = parseM3u(await res.text()).slice(0, limit);
-    const result = await upsertParsedChannels(parsed, {
-      defaultCountry: "XX",
-      markLocal: false,
-    });
-
-    revalidatePath("/");
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/channels");
-    revalidatePath("/dashboard/import");
-
+    const parsed = limit ? parseM3u(content).slice(0, limit) : parseM3u(content);
+    const result = await upsertParsedChannels(parsed, { markLocal: false });
+    revalidateCatalog();
     return { success: true, total: parsed.length, ...result };
   } catch (e) {
     console.error("[importIptvOrgCategory]", e);
@@ -218,36 +274,104 @@ export async function importIptvOrgCategory(input: {
   }
 }
 
-/** Legacy helper used by dashboard button — imports mixed international set. */
-export async function syncInternationalChannels(limit = 150): Promise<ImportResult> {
+/**
+ * Import ALL local (LK) channels + free-to-air catalogs
+ * from iptv-org country + category playlists.
+ */
+export async function importAllLocalAndFta(): Promise<ImportResult> {
   try {
     await requireImportPermission();
 
-    const [news, sports, entertainment] = await Promise.all([
-      fetch("https://iptv-org.github.io/iptv/categories/news.m3u", {
-        cache: "no-store",
-      }).then((r) => r.text()),
-      fetch("https://iptv-org.github.io/iptv/categories/sports.m3u", {
-        cache: "no-store",
-      }).then((r) => r.text()),
-      fetch("https://iptv-org.github.io/iptv/categories/entertainment.m3u", {
-        cache: "no-store",
-      }).then((r) => r.text()),
-    ]);
+    const urls = [
+      ...FTA_COUNTRIES.map((c) => ({
+        url: countryPlaylistUrl(c.code),
+        defaultCountry: c.code.toUpperCase(),
+        defaultCountryName: c.name,
+        markLocal: c.code === "lk",
+      })),
+      ...FTA_CATEGORIES.map((category) => ({
+        url: categoryPlaylistUrl(category),
+        defaultCountry: "XX",
+        defaultCountryName: "International",
+        markLocal: false,
+      })),
+    ];
 
-    const per = Math.ceil(limit / 3);
-    const parsed = [
-      ...parseM3u(news).slice(0, per),
-      ...parseM3u(sports).slice(0, per),
-      ...parseM3u(entertainment).slice(0, per),
-    ].slice(0, limit);
+    const collected: ParsedM3uChannel[] = [];
+    let sources = 0;
 
+    // Fetch in parallel batches to avoid flooding
+    const batchSize = 8;
+    for (let i = 0; i < urls.length; i += batchSize) {
+      const batch = urls.slice(i, i + batchSize);
+      const texts = await Promise.all(batch.map((b) => fetchPlaylist(b.url)));
+      texts.forEach((text, idx) => {
+        if (!text) return;
+        sources += 1;
+        const meta = batch[idx];
+        const parsed = parseM3u(text).map((ch) => ({
+          ...ch,
+          country: ch.country || meta.defaultCountry,
+          countryName:
+            ch.countryName ||
+            (ch.country
+              ? COUNTRY_NAME_BY_CODE[ch.country.toUpperCase()]
+              : undefined) ||
+            meta.defaultCountryName,
+        }));
+        // Force local flag for LK
+        for (const ch of parsed) {
+          if ((ch.country || "").toUpperCase() === "LK" || meta.markLocal) {
+            collected.push({ ...ch, country: "LK", countryName: "Sri Lanka" });
+          } else {
+            collected.push(ch);
+          }
+        }
+      });
+    }
+
+    const deduped = dedupeChannels(collected);
+    // Ensure LK channels marked local during upsert
+    const result = await upsertParsedChannels(deduped, { markLocal: false });
+
+    // Explicitly mark Sri Lanka channels as local
+    await prisma.channel.updateMany({
+      where: { country: "LK" },
+      data: { isLocal: true, countryName: "Sri Lanka", isHidden: false },
+    });
+
+    revalidateCatalog();
+    return {
+      success: true,
+      total: deduped.length,
+      sources,
+      ...result,
+    };
+  } catch (e) {
+    console.error("[importAllLocalAndFta]", e);
+    return {
+      success: false,
+      error:
+        e instanceof Error && e.message === "Unauthorized"
+          ? "Unauthorized"
+          : "Full FTA import failed.",
+    };
+  }
+}
+
+export async function syncInternationalChannels(limit = 300): Promise<ImportResult> {
+  try {
+    await requireImportPermission();
+    const cats = ["news", "sports", "entertainment", "kids", "movies", "music"];
+    const texts = await Promise.all(
+      cats.map((c) => fetchPlaylist(categoryPlaylistUrl(c))),
+    );
+    const per = Math.ceil(limit / cats.length);
+    const parsed = texts.flatMap((text, i) =>
+      text ? parseM3u(text).slice(0, per) : [],
+    );
     const result = await upsertParsedChannels(parsed, { markLocal: false });
-
-    revalidatePath("/");
-    revalidatePath("/dashboard");
-    revalidatePath("/dashboard/channels");
-
+    revalidateCatalog();
     return { success: true, total: parsed.length, ...result };
   } catch (e) {
     console.error("[syncInternationalChannels]", e);

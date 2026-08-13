@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { HlsPlayer } from "@/components/player/hls-player";
 import { ChannelGrid, type ChannelCardData } from "@/components/channels/channel-grid";
 import { Input } from "@/components/ui/input";
@@ -13,81 +13,139 @@ export type WatcherChannel = ChannelCardData & {
   streamUrl: string;
 };
 
+type Facets = {
+  countries: string[];
+  languages: string[];
+  categories: string[];
+};
+
 type TvWatcherProps = {
-  channels: WatcherChannel[];
+  initialChannels: WatcherChannel[];
+  initialTotal?: number;
+  facets?: Facets;
   favoriteIds?: string[];
   recentChannels?: WatcherChannel[];
   epgTitle?: string | null;
   epgNext?: string | null;
-  enableFilters?: boolean;
-  pageSize?: number;
   userName?: string | null;
   enableChat?: boolean;
+  pageSize?: number;
+  /** When true, use only provided channels (no /api/channels paging). */
+  localCatalog?: boolean;
 };
 
-const CATEGORIES = [
-  "All",
-  "General",
-  "News",
-  "Sports",
-  "Entertainment",
-  "Kids",
-];
+const DEFAULT_FACETS: Facets = {
+  countries: ["All"],
+  languages: ["All"],
+  categories: ["All"],
+};
 
 export function TvWatcher({
-  channels,
+  initialChannels,
+  initialTotal,
+  facets = DEFAULT_FACETS,
   favoriteIds: initialFavorites = [],
   recentChannels = [],
   epgTitle,
   epgNext,
-  enableFilters = true,
-  pageSize = 24,
   userName = null,
   enableChat = true,
+  pageSize = 48,
+  localCatalog = false,
 }: TvWatcherProps) {
-  const [activeId, setActiveId] = useState(channels[0]?.id ?? null);
+  const [channels, setChannels] = useState(initialChannels);
+  const [total, setTotal] = useState(initialTotal ?? initialChannels.length);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(
+    !localCatalog && initialChannels.length < (initialTotal ?? initialChannels.length),
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [activeId, setActiveId] = useState(initialChannels[0]?.id ?? null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [country, setCountry] = useState("All");
   const [language, setLanguage] = useState("All");
   const [category, setCategory] = useState("All");
-  const [visible, setVisible] = useState(pageSize);
+  const [localOnly, setLocalOnly] = useState(false);
   const [favorites, setFavorites] = useState(initialFavorites);
   const [pip, setPip] = useState(false);
   const [pending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const countries = useMemo(
-    () => ["All", ...Array.from(new Set(channels.map((c) => c.country))).sort()],
-    [channels],
-  );
-  const languages = useMemo(
-    () =>
-      [
-        "All",
-        ...Array.from(
-          new Set(channels.map((c) => c.language).filter(Boolean) as string[]),
-        ).sort(),
-      ],
-    [channels],
-  );
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return channels.filter((c) => {
-      if (q && !c.name.toLowerCase().includes(q)) return false;
-      if (country !== "All" && c.country !== country) return false;
-      if (language !== "All" && c.language !== language) return false;
-      if (category !== "All" && c.category !== category) return false;
-      return true;
-    });
-  }, [channels, query, country, language, category]);
-
-  const visibleChannels = filtered.slice(0, visible);
-  const active = channels.find((c) => c.id === activeId) ?? filtered[0] ?? null;
+  const fetchPage = useCallback(
+    async (nextPage: number, replace: boolean) => {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        limit: String(pageSize),
+        q: debouncedQuery,
+        country,
+        language,
+        category,
+        ...(localOnly ? { local: "1" } : {}),
+      });
+      const res = await fetch(`/api/channels?${params.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        channels: WatcherChannel[];
+        total: number;
+        hasMore: boolean;
+        page: number;
+      };
+      setTotal(data.total);
+      setHasMore(data.hasMore);
+      setPage(data.page);
+      setChannels((prev) => (replace ? data.channels : [...prev, ...data.channels]));
+      if (replace) {
+        setActiveId((current) => {
+          if (current && data.channels.some((c) => c.id === current)) return current;
+          return data.channels[0]?.id ?? null;
+        });
+      }
+    },
+    [pageSize, debouncedQuery, country, language, category, localOnly],
+  );
 
   useEffect(() => {
-    setVisible(pageSize);
-  }, [query, country, language, category, pageSize]);
+    if (localCatalog) {
+      setChannels(initialChannels);
+      setTotal(initialChannels.length);
+      setHasMore(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMore(true);
+    void fetchPage(1, true).finally(() => {
+      if (!cancelled) setLoadingMore(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPage, localCatalog, initialChannels]);
+
+  useEffect(() => {
+    if (localCatalog) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+          setLoadingMore(true);
+          void fetchPage(page + 1, false).finally(() => setLoadingMore(false));
+        }
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fetchPage, hasMore, loadingMore, page, localCatalog]);
+
+  const active =
+    channels.find((c) => c.id === activeId) ?? channels[0] ?? null;
 
   useEffect(() => {
     if (!active?.id) return;
@@ -95,21 +153,6 @@ export function TvWatcher({
       void recordWatch(active.id);
     });
   }, [active?.id]);
-
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setVisible((v) => Math.min(v + pageSize, filtered.length));
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [filtered.length, pageSize]);
 
   const onSelect = useCallback((id: string) => setActiveId(id), []);
 
@@ -189,68 +232,73 @@ export function TvWatcher({
       </section>
 
       <aside className="space-y-4">
-        {enableFilters && (
-          <div className="space-y-3 rounded-xl border border-border/60 bg-card/30 p-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search channels…"
-                className="pl-8"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-              >
-                {countries.map((c) => (
-                  <option key={c} value={c}>
-                    {c === "All" ? "All countries" : c}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                {languages.map((l) => (
-                  <option key={l} value={l}>
-                    {l === "All" ? "All languages" : l}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.map((cat) => (
-                <Badge
-                  key={cat}
-                  variant={category === cat ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() => setCategory(cat)}
-                >
-                  {cat}
-                </Badge>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Showing {visibleChannels.length} of {filtered.length}
-              {pending ? " · syncing…" : ""}
-            </p>
+        <div className="space-y-3 rounded-xl border border-border/60 bg-card/30 p-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search channels…"
+              className="pl-8"
+            />
           </div>
-        )}
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+            >
+              {facets.countries.map((c) => (
+                <option key={c} value={c}>
+                  {c === "All" ? "All countries" : c}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              {facets.languages.map((l) => (
+                <option key={l} value={l || "All"}>
+                  {l === "All" ? "All languages" : l}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Badge
+              variant={localOnly ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => setLocalOnly((v) => !v)}
+            >
+              Local LK
+            </Badge>
+            {facets.categories.slice(0, 12).map((cat) => (
+              <Badge
+                key={cat}
+                variant={category === cat ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setCategory(cat)}
+              >
+                {cat}
+              </Badge>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Showing {channels.length} of {total.toLocaleString()}
+            {pending || loadingMore ? " · loading…" : ""}
+          </p>
+        </div>
 
         <div className="max-h-[70vh] overflow-y-auto pr-1">
           <ChannelGrid
-            channels={visibleChannels}
+            channels={channels}
             activeId={active?.id}
             favoriteIds={favorites}
             onSelect={onSelect}
             onToggleFavorite={onToggleFavorite}
-            loadingMore={visible < filtered.length}
+            loadingMore={loadingMore}
           />
           <div ref={sentinelRef} className="h-4" />
         </div>

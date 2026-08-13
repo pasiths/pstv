@@ -6,22 +6,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  importAllLocalAndFta,
   importIptvOrgCategory,
   importIptvOrgCountry,
   importM3uPlaylist,
   syncInternationalChannels,
 } from "@/actions/sync";
+import { FTA_COUNTRIES } from "@/lib/iptv-catalog";
 
-const QUICK_COUNTRIES = [
-  { code: "lk", label: "Sri Lanka" },
-  { code: "in", label: "India" },
-  { code: "us", label: "USA" },
-  { code: "gb", label: "UK" },
-  { code: "ae", label: "UAE" },
-  { code: "sg", label: "Singapore" },
+const QUICK_COUNTRIES = FTA_COUNTRIES.slice(0, 12);
+const QUICK_CATEGORIES = [
+  "news",
+  "sports",
+  "entertainment",
+  "kids",
+  "movies",
+  "music",
+  "documentary",
 ];
-
-const QUICK_CATEGORIES = ["news", "sports", "entertainment", "kids", "movies", "music"];
 
 export function ChannelImportPanel() {
   const [pending, startTransition] = useTransition();
@@ -39,6 +41,7 @@ export function ChannelImportPanel() {
       created?: number;
       updated?: number;
       total?: number;
+      sources?: number;
     }>,
   ) => {
     startTransition(async () => {
@@ -48,17 +51,36 @@ export function ChannelImportPanel() {
         return;
       }
       toast.success(
-        `${label}: +${res.created ?? 0} new, ${res.updated ?? 0} updated (${res.total ?? 0} total)`,
+        `${label}: +${res.created ?? 0} new, ${res.updated ?? 0} updated (${res.total ?? 0} channels${res.sources ? `, ${res.sources} sources` : ""})`,
       );
     });
   };
 
   return (
     <div className="space-y-6">
-      <section className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-4">
-        <h2 className="font-medium">Import by country (iptv-org)</h2>
+      <section className="space-y-3 rounded-xl border border-teal-500/30 bg-teal-500/5 p-4">
+        <h2 className="font-medium">Import all local + free-to-air</h2>
         <p className="text-sm text-muted-foreground">
-          Loads real free-to-air m3u8 streams from the public iptv-org catalog.
+          Pulls Sri Lanka local channels and free-to-air catalogs from{" "}
+          {FTA_COUNTRIES.length} countries + major categories via iptv-org.
+          This can take a few minutes.
+        </p>
+        <Button
+          type="button"
+          disabled={pending}
+          className="bg-teal-600 hover:bg-teal-500"
+          onClick={() =>
+            run("Full local + FTA import", () => importAllLocalAndFta())
+          }
+        >
+          {pending ? "Importing…" : "Import all local & FTA channels"}
+        </Button>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-4">
+        <h2 className="font-medium">Import by country</h2>
+        <p className="text-sm text-muted-foreground">
+          Real free-to-air m3u8 streams from iptv-org country playlists.
         </p>
         <div className="flex flex-wrap gap-2">
           {QUICK_COUNTRIES.map((c) => (
@@ -70,7 +92,7 @@ export function ChannelImportPanel() {
               disabled={pending}
               onClick={() => {
                 setCountry(c.code);
-                run(`Import ${c.label}`, () =>
+                run(`Import ${c.name}`, () =>
                   importIptvOrgCountry({
                     country: c.code,
                     markLocal: c.code === "lk",
@@ -78,7 +100,7 @@ export function ChannelImportPanel() {
                 );
               }}
             >
-              {c.label}
+              {c.name}
             </Button>
           ))}
         </div>
@@ -122,7 +144,7 @@ export function ChannelImportPanel() {
               disabled={pending}
               onClick={() =>
                 run(`Import ${cat}`, () =>
-                  importIptvOrgCategory({ category: cat, limit: 80 }),
+                  importIptvOrgCategory({ category: cat }),
                 )
               }
             >
@@ -135,10 +157,10 @@ export function ChannelImportPanel() {
           variant="secondary"
           disabled={pending}
           onClick={() =>
-            run("Sync mixed international", () => syncInternationalChannels(150))
+            run("Sync mixed catalog", () => syncInternationalChannels(400))
           }
         >
-          Sync mixed news + sports + entertainment
+          Sync mixed news / sports / entertainment / kids
         </Button>
       </section>
 

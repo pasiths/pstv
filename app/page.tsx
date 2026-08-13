@@ -6,27 +6,52 @@ import { TvWatcher } from "@/components/channels/tv-watcher";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_LIMIT = 48;
+
 export default async function HomePage() {
   const user = await getCurrentUser();
 
-  const channels = await prisma.channel.findMany({
-    where: { isHidden: false, isBroken: false },
-    orderBy: [{ isLocal: "desc" }, { sortOrder: "asc" }, { name: "asc" }],
-  });
+  const where = { isHidden: false };
 
-  // If everything is marked broken, still show something
-  const fallbackChannels =
-    channels.length > 0
-      ? channels
-      : await prisma.channel.findMany({
-          where: { isHidden: false },
-          orderBy: [{ isLocal: "desc" }, { sortOrder: "asc" }],
-        });
-
-  const displayChannels = fallbackChannels;
+  const [total, channels, countries, languages, categories, localCount] =
+    await Promise.all([
+      prisma.channel.count({ where }),
+      prisma.channel.findMany({
+        where,
+        orderBy: [
+          { isLocal: "desc" },
+          { isBroken: "asc" },
+          { sortOrder: "asc" },
+          { name: "asc" },
+        ],
+        take: PAGE_LIMIT,
+      }),
+      prisma.channel.findMany({
+        where,
+        distinct: ["country"],
+        select: { country: true },
+        orderBy: { country: "asc" },
+        take: 300,
+      }),
+      prisma.channel.findMany({
+        where: { ...where, language: { not: null } },
+        distinct: ["language"],
+        select: { language: true },
+        orderBy: { language: "asc" },
+        take: 200,
+      }),
+      prisma.channel.findMany({
+        where,
+        distinct: ["category"],
+        select: { category: true },
+        orderBy: { category: "asc" },
+        take: 100,
+      }),
+      prisma.channel.count({ where: { isHidden: false, isLocal: true } }),
+    ]);
 
   let favoriteIds: string[] = [];
-  let recentChannels: typeof displayChannels = [];
+  let recentChannels: typeof channels = [];
 
   if (user) {
     const [favorites, history] = await Promise.all([
@@ -44,11 +69,12 @@ export default async function HomePage() {
     favoriteIds = favorites.map((f) => f.channelId);
     recentChannels = history
       .map((h) => h.channel)
-      .filter((c) => !c.isHidden && !c.isBroken);
+      .filter((c) => !c.isHidden);
   }
 
   const now = new Date();
-  const firstLocal = displayChannels.find((c) => c.isLocal && !c.isBroken) ?? displayChannels[0];
+  const firstLocal =
+    channels.find((c) => c.isLocal && !c.isBroken) ?? channels[0];
   let epgTitle: string | null = null;
   let epgNext: string | null = null;
   if (firstLocal) {
@@ -62,7 +88,7 @@ export default async function HomePage() {
     epgNext = upcoming?.title ?? null;
   }
 
-  const mapped = displayChannels.map((c) => ({
+  const mapped = channels.map((c) => ({
     id: c.id,
     name: c.name,
     logoUrl: c.logoUrl,
@@ -89,12 +115,23 @@ export default async function HomePage() {
             FluxTV
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Local Sri Lankan channels first, with global free streams, search,
-            and a dark developer-friendly player.
+            {localCount} local LK channels and {total.toLocaleString()} free-to-air
+            streams worldwide. Search, filter by country/category, and cast to TV.
           </p>
         </div>
         <TvWatcher
-          channels={mapped}
+          initialChannels={mapped}
+          initialTotal={total}
+          facets={{
+            countries: ["All", ...countries.map((c) => c.country)],
+            languages: [
+              "All",
+              ...languages
+                .map((l) => l.language)
+                .filter((v): v is string => Boolean(v)),
+            ],
+            categories: ["All", ...categories.map((c) => c.category)],
+          }}
           favoriteIds={favoriteIds}
           recentChannels={recentChannels.map((c) => ({
             id: c.id,
@@ -109,9 +146,9 @@ export default async function HomePage() {
           }))}
           epgTitle={epgTitle}
           epgNext={epgNext}
-          enableFilters
           userName={user?.name}
           enableChat
+          pageSize={PAGE_LIMIT}
         />
       </main>
     </div>

@@ -48,7 +48,8 @@ export default function LoginPage() {
           </div>
           <CardTitle className="font-heading text-2xl">Welcome to PSTV</CardTitle>
           <CardDescription>
-            Sign in to sync favorites and history · education-only lab by pasiths.tech
+            Sign in to sync favorites and history · by Pasith Senevirathna
+            (pasiths.tech)
           </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>

@@ -131,7 +131,8 @@ export default async function HomePage() {
             {localCount.toLocaleString()} local LK · {freeCount.toLocaleString()} free ·{" "}
             {paidCount.toLocaleString()} paid · {total.toLocaleString()} total.
             Installable on iPhone, Android, and Windows as a web app.{" "}
-            <span className="text-foreground/80">{SITE.educationNotice}</span>
+            <span className="text-foreground/80">{SITE.educationNotice}</span>{" "}
+            <span className="text-foreground/90">{SITE.channelThanks}</span>
           </p>
         </div>
         <TvWatcher

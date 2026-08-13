@@ -44,3 +44,6 @@ next-env.d.ts
 
 # prisma generated client
 /generated
+
+# local caches (EPG, etc.)
+.cache/

@@ -15,11 +15,11 @@ import {
   PictureInPicture2,
   Cast,
   Airplay,
-  Share2,
-  Copy,
   Check,
   Captions,
   CaptionsOff,
+  Settings2,
+  Volume1,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -39,12 +39,62 @@ import {
 } from "@/hooks/use-auto-captions";
 
 const CAPTION_MODE_KEY = "fluxtv_caption_mode";
+const QUALITY_PREF_KEY = "fluxtv_quality_pref";
+
+type QualityOption = {
+  /** -1 = Auto ABR */
+  index: number;
+  label: string;
+  height: number;
+  bitrate: number;
+};
 
 function readCaptionMode(): CaptionMode {
   if (typeof window === "undefined") return "off";
   const raw = window.localStorage.getItem(CAPTION_MODE_KEY);
   if (raw === "on" || raw === "auto-en" || raw === "off") return raw;
   return "off";
+}
+
+function readQualityPref(): "auto" | number {
+  if (typeof window === "undefined") return "auto";
+  const raw = window.localStorage.getItem(QUALITY_PREF_KEY);
+  if (!raw || raw === "auto") return "auto";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : "auto";
+}
+
+function formatQualityLabel(height: number, bitrate: number): string {
+  if (height >= 2100) return "4K";
+  if (height >= 1000) return `${height}p`;
+  if (height >= 700) return `${height}p`;
+  if (height >= 400) return `${height}p`;
+  if (height > 0) return `${height}p`;
+  if (bitrate > 0) {
+    const mbps = bitrate / 1_000_000;
+    return mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(bitrate / 1000)} kbps`;
+  }
+  return "Source";
+}
+
+function pickLevelForPref(
+  levels: QualityOption[],
+  pref: "auto" | number,
+): number {
+  if (pref === "auto" || !levels.length) return -1;
+  const exact = levels.find((l) => l.height === pref);
+  if (exact) return exact.index;
+  // Closest height at or below preferred, else nearest
+  const sorted = [...levels].sort((a, b) => a.height - b.height);
+  let best = sorted[0];
+  for (const l of sorted) {
+    if (l.height <= pref) best = l;
+  }
+  const above = sorted.find((l) => l.height >= pref);
+  if (above && Math.abs(above.height - pref) < Math.abs(best.height - pref)) {
+    return above.index;
+  }
+  return best.index;
 }
 type HlsPlayerProps = {
   src: string;
@@ -77,16 +127,23 @@ export function HlsPlayer({
   const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(0.85);
+  const lastVolumeRef = useRef(0.85);
   const [playing, setPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
   const [castAvailable, setCastAvailable] = useState(false);
+  const [airPlayAvailable, setAirPlayAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [captionMode, setCaptionMode] = useState<CaptionMode>("off");
   const [streamCue, setStreamCue] = useState("");
   const [hasStreamSubs, setHasStreamSubs] = useState(false);
+  const [qualities, setQualities] = useState<QualityOption[]>([]);
+  const [qualityIndex, setQualityIndex] = useState(-1); // -1 = Auto
+  const [activeHeight, setActiveHeight] = useState(0);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const qualityPrefRef = useRef<"auto" | number>("auto");
 
   const playSrc = useProxy ? proxiedStreamUrl(src) : src;
   const autoCaptions = useAutoCaptions({
@@ -96,6 +153,7 @@ export function HlsPlayer({
 
   useEffect(() => {
     setCaptionMode(readCaptionMode());
+    qualityPrefRef.current = readQualityPref();
   }, []);
 
   useEffect(() => {
@@ -106,23 +164,74 @@ export function HlsPlayer({
     }
   }, [captionMode]);
 
+  useEffect(() => {
+    if (!qualityOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-quality-menu]")) return;
+      setQualityOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [qualityOpen]);
+
   const bumpControls = useCallback(() => {
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (playing && !error) setControlsVisible(false);
+      if (playing && !error) {
+        setControlsVisible(false);
+        setQualityOpen(false);
+      }
     }, 2800);
   }, [playing, error]);
+
+  const applyQuality = useCallback(
+    (index: number, height = 0) => {
+      const hls = hlsRef.current;
+      setQualityIndex(index);
+      setQualityOpen(false);
+      bumpControls();
+
+      const pref: "auto" | number = index < 0 ? "auto" : height || "auto";
+      qualityPrefRef.current = pref;
+      try {
+        window.localStorage.setItem(
+          QUALITY_PREF_KEY,
+          pref === "auto" ? "auto" : String(pref),
+        );
+      } catch {
+        // ignore
+      }
+
+      if (!hls) {
+        toast.message("Quality control needs HLS playback");
+        return;
+      }
+
+      hls.currentLevel = index;
+      if (index < 0) {
+        toast.message("Quality: Auto");
+      } else {
+        const label =
+          qualities.find((q) => q.index === index)?.label ||
+          formatQualityLabel(height, 0);
+        toast.message(`Quality: ${label}`);
+      }
+    },
+    [bumpControls, qualities],
+  );
 
   useEffect(() => {
     let cancelled = false;
     void initCastContext().then((ctx) => {
       if (cancelled || !ctx || !window.cast?.framework) return;
-      setCastAvailable(true);
+      const CastState = window.cast.framework.CastState;
       const onState = (e: { castState?: string }) => {
-        const connected =
-          e.castState === window.cast?.framework?.CastState.CONNECTED;
-        setCasting(Boolean(connected));
+        const state = e.castState ?? ctx.getCastState();
+        const noDevices = state === CastState.NO_DEVICES_AVAILABLE;
+        setCastAvailable(!noDevices);
+        setCasting(state === CastState.CONNECTED);
       };
       ctx.addEventListener(
         window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
@@ -146,20 +255,51 @@ export function HlsPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    let cancelled = false;
+    let cancelWatch: (() => void) | undefined;
+
+    // Only show when a nearby device is available — not merely because the API exists.
     const onAirPlay = (event: Event) => {
-      // Availability changes are informational; picker still works when supported.
-      void (event as Event & { availability?: string }).availability;
+      const availability = (event as Event & { availability?: string }).availability;
+      if (cancelled) return;
+      if (availability === "available") setAirPlayAvailable(true);
+      else if (availability === "not-available") setAirPlayAvailable(false);
     };
 
     video.addEventListener(
       "webkitplaybacktargetavailabilitychanged",
       onAirPlay as EventListener,
     );
+
+    const remote = (
+      video as HTMLVideoElement & {
+        remote?: {
+          watchAvailability?: (cb: (available: boolean) => void) => Promise<number>;
+          cancelWatchAvailability?: (id?: number) => void;
+        };
+      }
+    ).remote;
+
+    if (remote?.watchAvailability) {
+      void remote
+        .watchAvailability((available) => {
+          if (!cancelled) setAirPlayAvailable(available);
+        })
+        .then((id) => {
+          cancelWatch = () => remote.cancelWatchAvailability?.(id);
+        })
+        .catch(() => {
+          // Unsupported — wait for webkit availability events instead.
+        });
+    }
+
     return () => {
+      cancelled = true;
       video.removeEventListener(
         "webkitplaybacktargetavailabilitychanged",
         onAirPlay as EventListener,
       );
+      cancelWatch?.();
     };
   }, [ready]);
 
@@ -176,6 +316,10 @@ export function HlsPlayer({
     setControlsVisible(true);
     setStreamCue("");
     setHasStreamSubs(false);
+    setQualities([]);
+    setQualityIndex(-1);
+    setActiveHeight(0);
+    setQualityOpen(false);
 
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => {
@@ -229,11 +373,11 @@ export function HlsPlayer({
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
             startLevel: -1,
-            capLevelToPlayerSize: true,
+            // Allow manual quality picks; Auto still adapts via ABR.
+            capLevelToPlayerSize: false,
             progressive: true,
             enableWebVTT: true,
             enableIMSC1: true,
-            enableCEA608Captions: true,
             renderTextTracksNatively: true,
             xhrSetup: (xhr) => {
               xhr.withCredentials = false;
@@ -250,13 +394,38 @@ export function HlsPlayer({
             setHasStreamSubs(tracks.length > 0);
           };
 
+          const syncLevels = () => {
+            const opts: QualityOption[] = (hls.levels || []).map((level, index) => {
+              const height = level.height || 0;
+              const bitrate = level.bitrate || 0;
+              return {
+                index,
+                height,
+                bitrate,
+                label: formatQualityLabel(height, bitrate),
+              };
+            });
+            // Highest first in the menu
+            const sorted = [...opts].sort((a, b) => b.height - a.height || b.bitrate - a.bitrate);
+            setQualities(sorted);
+            const pref = qualityPrefRef.current;
+            const chosen = pickLevelForPref(sorted, pref);
+            hls.currentLevel = chosen;
+            setQualityIndex(chosen);
+            if (chosen >= 0) {
+              const q = sorted.find((x) => x.index === chosen);
+              setActiveHeight(q?.height || 0);
+            } else if (hls.levels[hls.currentLevel]) {
+              setActiveHeight(hls.levels[hls.currentLevel]?.height || 0);
+            }
+          };
+
           hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, syncSubtitleTracks);
           hls.on(Hls.Events.MANIFEST_PARSED, async (_e, data) => {
             if (cancelled) return;
             syncSubtitleTracks();
-            if (data.levels.length > 1) {
-              hls.startLevel = Math.min(1, data.levels.length - 1);
-            }
+            syncLevels();
+            void data;
             setReady(true);
             setBuffering(false);
             try {
@@ -264,6 +433,12 @@ export function HlsPlayer({
             } catch {
               // muted autoplay
             }
+          });
+
+          hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+            if (cancelled) return;
+            const level = hls.levels[data.level];
+            setActiveHeight(level?.height || 0);
           });
 
           hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -329,7 +504,37 @@ export function HlsPlayer({
     const video = videoRef.current;
     if (!video) return;
     video.muted = muted;
-  }, [muted]);
+    video.volume = muted ? 0 : volume;
+  }, [muted, volume]);
+
+  const setVolumeLevel = useCallback(
+    (next: number) => {
+      const clamped = Math.min(1, Math.max(0, next));
+      setVolume(clamped);
+      if (clamped <= 0.001) {
+        setMuted(true);
+      } else {
+        lastVolumeRef.current = clamped;
+        setMuted(false);
+      }
+      bumpControls();
+    },
+    [bumpControls],
+  );
+
+  const toggleMute = useCallback(() => {
+    setMuted((m) => {
+      if (m) {
+        const restore = lastVolumeRef.current > 0.05 ? lastVolumeRef.current : 0.85;
+        setVolume(restore);
+        return false;
+      }
+      lastVolumeRef.current = volume > 0.05 ? volume : lastVolumeRef.current;
+      return true;
+    });
+    bumpControls();
+  }, [bumpControls, volume]);
+
 
   useEffect(() => {
     const hls = hlsRef.current;
@@ -364,7 +569,7 @@ export function HlsPlayer({
         if (!cues?.length) continue;
         const parts: string[] = [];
         for (let j = 0; j < cues.length; j++) {
-          const cue = cues[j] as TextCue & { text?: string };
+          const cue = cues[j] as TextTrackCue & { text?: string };
           if (cue.text) parts.push(cue.text);
         }
         if (parts.length) {
@@ -505,36 +710,6 @@ export function HlsPlayer({
     }
   };
 
-  const handleShare = async () => {
-    bumpControls();
-    const shareUrl = typeof window !== "undefined" ? window.location.href : src;
-    const payload = {
-      title: title ? `${title} · FluxTV` : "FluxTV",
-      text: `Watch ${title || "live TV"} on FluxTV`,
-      url: shareUrl,
-    };
-
-    try {
-      if (navigator.share) {
-        await navigator.share(payload);
-        return;
-      }
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      toast.success("Link copied");
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      try {
-        await navigator.clipboard.writeText(src);
-        setCopied(true);
-        toast.success("Stream URL copied");
-        setTimeout(() => setCopied(false), 1600);
-      } catch {
-        toast.error("Unable to share");
-      }
-    }
-  };
-
   return (
     <div
       ref={shellRef}
@@ -546,7 +721,10 @@ export function HlsPlayer({
       )}
       onMouseMove={bumpControls}
       onMouseLeave={() => {
-        if (playing && !error) setControlsVisible(false);
+        if (playing && !error) {
+          setControlsVisible(false);
+          setQualityOpen(false);
+        }
       }}
       onClick={bumpControls}
     >
@@ -572,7 +750,7 @@ export function HlsPlayer({
 
       {(captionText || (captionMode === "auto-en" && autoCaptions.pending)) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-20 z-[25] flex justify-center px-4 sm:bottom-24">
-          <div className="max-w-[92%] rounded-md bg-black/75 px-3 py-2 text-center text-sm leading-snug text-white shadow-lg backdrop-blur-sm sm:text-base">
+          <div className="max-w-[min(92%,36rem)] rounded-md bg-black/75 px-3 py-2 text-center text-sm leading-snug text-white shadow-lg backdrop-blur-sm sm:text-base">
             {captionText || (
               <span className="inline-flex items-center gap-2 text-white/70">
                 <Loader2 className="size-3.5 animate-spin" />
@@ -593,60 +771,68 @@ export function HlsPlayer({
 
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/80 via-black/35 to-transparent px-4 pt-4 pb-16 transition-opacity duration-300",
+          "pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/80 via-black/30 to-transparent px-4 pt-4 pb-14 transition-opacity duration-300",
           controlsVisible || !ready || error ? "opacity-100" : "opacity-0",
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-[0.14em] text-white uppercase shadow-sm">
-                <span className="size-1.5 animate-pulse rounded-full bg-white" />
-                Live
-              </span>
-              {casting && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-teal-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
-                  <Cast className="size-3" />
-                  Casting
-                </span>
-              )}
-              {category && (
-                <span className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/75 backdrop-blur-sm">
-                  {category}
-                </span>
-              )}
-              {country && (
-                <span className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/75 backdrop-blur-sm">
-                  {country}
-                </span>
-              )}
-            </div>
-            {title && (
-              <h2 className="truncate font-heading text-lg font-semibold tracking-tight text-white drop-shadow sm:text-xl">
-                {title}
-              </h2>
-            )}
-          </div>
-          <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
-            <span className="hidden items-center gap-1.5 rounded-full border border-teal-400/25 bg-teal-500/10 px-2.5 py-1 text-[10px] font-medium tracking-wide text-teal-200 uppercase sm:inline-flex">
-              <Radio className="size-3" />
-              FluxTV
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-[0.14em] text-white uppercase shadow-sm">
+            <span className="size-1.5 animate-pulse rounded-full bg-white" />
+            Live
+          </span>
+          {casting && (
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-teal-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+              <Cast className="size-3" />
+              Casting
             </span>
-          </div>
+          )}
+          {category && (
+            <span className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/75 backdrop-blur-sm">
+              {category}
+            </span>
+          )}
+          {country && (
+            <span className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/75 backdrop-blur-sm">
+              {country}
+            </span>
+          )}
+          <span className="hidden items-center gap-1.5 rounded-full border border-teal-400/25 bg-teal-500/10 px-2.5 py-1 text-[10px] font-medium tracking-wide text-teal-200 uppercase sm:inline-flex">
+            <Radio className="size-3" />
+            FluxTV
+          </span>
         </div>
+        {title && (
+          <h2 className="truncate font-heading text-lg font-semibold tracking-tight text-white drop-shadow sm:text-xl">
+            {title}
+          </h2>
+        )}
       </div>
 
-      {(!ready || buffering) && !error && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[#05080c]/55 backdrop-blur-[2px]">
-          <div className="relative">
-            <div className="absolute inset-0 animate-ping rounded-full bg-teal-400/20" />
-            <div className="relative flex size-14 items-center justify-center rounded-full border border-teal-400/30 bg-black/50">
-              <Loader2 className="size-6 animate-spin text-teal-300" />
+      {!error && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          {!ready || buffering ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="relative flex size-16 items-center justify-center rounded-full border border-teal-400/35 bg-black/55 shadow-lg backdrop-blur-sm">
+                <div className="absolute inset-0 animate-ping rounded-full bg-teal-400/15" />
+                <Loader2 className="relative size-7 animate-spin text-teal-300" />
+              </div>
+              <p className="text-[11px] tracking-wide text-white/70">
+                {ready ? "Buffering…" : "Loading…"}
+              </p>
             </div>
-          </div>
-          <p className="text-xs tracking-wide text-white/70">
-            {ready ? "Buffering stream…" : `Tuning${title ? ` ${title}` : ""}…`}
-          </p>
+          ) : !playing ? (
+            <button
+              type="button"
+              aria-label="Play"
+              className="pointer-events-auto flex size-16 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-sm transition hover:scale-105 hover:bg-teal-600/80"
+              onClick={(e) => {
+                e.stopPropagation();
+                void togglePlay();
+              }}
+            >
+              <Play className="size-7 fill-current pl-0.5" />
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -675,89 +861,153 @@ export function HlsPlayer({
 
       <div
         className={cn(
-          "absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pt-16 pb-3 transition-all duration-300 sm:px-4 sm:pb-4",
+          "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-300",
           controlsVisible || !ready || error
-            ? "translate-y-0 opacity-100"
-            : "pointer-events-none translate-y-2 opacity-0",
+            ? "opacity-100"
+            : "pointer-events-none opacity-0",
         )}
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 h-0.5 overflow-hidden rounded-full bg-white/10">
-          <div className="h-full w-2/5 animate-pulse rounded-full bg-gradient-to-r from-teal-500/80 to-teal-300/50" />
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+        <div className="bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2 pb-2 pt-10 sm:px-3">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             <ControlButton
               label={playing ? "Pause" : "Play"}
               onClick={() => void togglePlay()}
             >
-              {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+              {playing ? (
+                <Pause className="size-[1.15rem]" />
+              ) : (
+                <Play className="size-[1.15rem] fill-current" />
+              )}
             </ControlButton>
-            <ControlButton
-              label={muted ? "Unmute" : "Mute"}
-              onClick={() => {
-                setMuted((m) => !m);
-                void videoRef.current?.play();
-                bumpControls();
-              }}
-            >
-              {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-              <span className="hidden text-xs sm:inline">
-                {muted ? "Unmute" : "Mute"}
-              </span>
-            </ControlButton>
-          </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div className="group/vol flex items-center">
+              <ControlButton
+                label={muted || volume <= 0 ? "Unmute" : "Mute"}
+                onClick={toggleMute}
+              >
+                {muted || volume <= 0 ? (
+                  <VolumeX className="size-[1.15rem]" />
+                ) : volume < 0.45 ? (
+                  <Volume1 className="size-[1.15rem]" />
+                ) : (
+                  <Volume2 className="size-[1.15rem]" />
+                )}
+              </ControlButton>
+              <div
+                className={cn(
+                  "flex w-0 items-center overflow-hidden opacity-0 transition-all duration-200 ease-out",
+                  "group-hover/vol:w-24 group-hover/vol:opacity-100 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100",
+                )}
+              >
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={muted ? 0 : Math.round(volume * 100)}
+                  aria-label="Volume"
+                  className="ml-1 h-1 w-[88px] cursor-pointer appearance-none rounded-full bg-white/30 accent-white [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                  onChange={(e) => {
+                    setVolumeLevel(Number(e.target.value) / 100);
+                  }}
+                />
+              </div>
+            </div>
+
+            <span className="ml-1 hidden items-center gap-1.5 text-[11px] font-medium tracking-wide text-white/80 uppercase sm:inline-flex">
+              <span className="size-1.5 animate-pulse rounded-full bg-red-500" />
+              Live
+            </span>
+
+            <div className="min-w-2 flex-1" />
+
+            <div className="relative" data-quality-menu>
+              <ControlButton
+                label="Video quality"
+                active={qualityIndex >= 0 || qualityOpen}
+                disabled={!qualities.length && !hlsRef.current}
+                onClick={() => {
+                  bumpControls();
+                  if (!qualities.length) {
+                    toast.message("This stream has no selectable quality levels");
+                    return;
+                  }
+                  setQualityOpen((v) => !v);
+                }}
+              >
+                <Settings2 className="size-[1.15rem]" />
+              </ControlButton>
+              {qualityOpen && qualities.length > 0 && (
+                <div className="absolute right-0 bottom-[calc(100%+8px)] z-40 min-w-[8.5rem] overflow-hidden rounded-lg border border-white/15 bg-[#0b1218]/95 py-1 shadow-xl backdrop-blur-md">
+                  <p className="px-3 py-1.5 text-[10px] font-semibold tracking-wide text-white/50 uppercase">
+                    Quality
+                  </p>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-white/90 hover:bg-white/10",
+                      qualityIndex < 0 && "bg-teal-500/20 text-teal-100",
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      applyQuality(-1);
+                    }}
+                  >
+                    <span>Auto{activeHeight ? ` · ${activeHeight}p` : ""}</span>
+                    {qualityIndex < 0 && <Check className="size-3.5" />}
+                  </button>
+                  {qualities.map((q) => (
+                    <button
+                      key={`${q.index}-${q.label}`}
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-white/90 hover:bg-white/10",
+                        qualityIndex === q.index && "bg-teal-500/20 text-teal-100",
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        applyQuality(q.index, q.height);
+                      }}
+                    >
+                      <span>{q.label}</span>
+                      {qualityIndex === q.index && <Check className="size-3.5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <ControlButton
               label={`${captionModeLabel(captionMode)}. Click to cycle: Off → On → Auto EN`}
               active={captionMode !== "off"}
               onClick={toggleCaptions}
             >
               {captionMode === "off" ? (
-                <CaptionsOff className="size-4" />
+                <CaptionsOff className="size-[1.15rem]" />
               ) : (
-                <Captions className="size-4" />
+                <Captions className="size-[1.15rem]" />
               )}
-              <span className="hidden text-[10px] font-medium tracking-wide uppercase sm:inline">
-                {captionModeLabel(captionMode)}
-              </span>
             </ControlButton>
-            <ControlButton label="Share" onClick={() => void handleShare()}>
-              {copied ? <Check className="size-4" /> : <Share2 className="size-4" />}
-            </ControlButton>
-            <ControlButton
-              label="Copy stream URL"
-              onClick={async () => {
-                bumpControls();
-                try {
-                  await navigator.clipboard.writeText(src);
-                  setCopied(true);
-                  toast.success("Stream URL copied");
-                  setTimeout(() => setCopied(false), 1600);
-                } catch {
-                  toast.error("Copy failed");
-                }
-              }}
-            >
-              <Copy className="size-4" />
-            </ControlButton>
-            <ControlButton label="AirPlay / Apple TV" onClick={() => void handleAirPlay()}>
-              <Airplay className="size-4" />
-            </ControlButton>
-            <ControlButton
-              label={
-                castAvailable
-                  ? casting
-                    ? "Connected to Chromecast"
-                    : "Chromecast"
-                  : "Chromecast (loading…)"
-              }
-              active={casting}
-              onClick={() => void handleCast()}
-            >
-              <Cast className="size-4" />
-            </ControlButton>
+
+            {airPlayAvailable && (
+              <ControlButton
+                label="AirPlay / Apple TV"
+                onClick={() => void handleAirPlay()}
+              >
+                <Airplay className="size-[1.15rem]" />
+              </ControlButton>
+            )}
+
+            {castAvailable && (
+              <ControlButton
+                label={casting ? "Connected to Chromecast" : "Chromecast"}
+                active={casting}
+                onClick={() => void handleCast()}
+              >
+                <Cast className="size-[1.15rem]" />
+              </ControlButton>
+            )}
+
             {onPipToggle && (
               <ControlButton
                 label="Picture in picture"
@@ -767,17 +1017,18 @@ export function HlsPlayer({
                   bumpControls();
                 }}
               >
-                <PictureInPicture2 className="size-4" />
+                <PictureInPicture2 className="size-[1.15rem]" />
               </ControlButton>
             )}
+
             <ControlButton
               label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
               onClick={() => void toggleFullscreen()}
             >
               {isFullscreen ? (
-                <Minimize className="size-4" />
+                <Minimize className="size-[1.15rem]" />
               ) : (
-                <Maximize className="size-4" />
+                <Maximize className="size-[1.15rem]" />
               )}
             </ControlButton>
           </div>
@@ -811,11 +1062,10 @@ function ControlButton({
         onClick();
       }}
       className={cn(
-        "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-white transition",
-        "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/15",
-        "backdrop-blur-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/50",
+        "inline-flex size-10 shrink-0 items-center justify-center rounded-full text-white transition",
+        "hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
         "disabled:cursor-not-allowed disabled:opacity-40",
-        active && "border-teal-400/40 bg-teal-500/20 text-teal-100",
+        active && "bg-white/10 text-teal-200",
       )}
     >
       {children}

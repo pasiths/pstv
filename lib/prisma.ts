@@ -11,10 +11,8 @@ function resolveSsl(connectionString: string | undefined): PgSsl {
   const urlWantsSsl =
     /(?:[?&]sslmode=(?:require|verify-ca|verify-full|prefer)|[?&]ssl=true)/i.test(url);
   const flag = process.env.DATABASE_SSL;
-  // Opt-in full cert verify. Wrong/outdated CA otherwise breaks managed DBs (Aiven).
   const verify = process.env.DATABASE_SSL_VERIFY === "true";
 
-  // Local Postgres: DATABASE_SSL=false and no sslmode in the URL
   if (flag === "false" && !urlWantsSsl) {
     return false;
   }
@@ -23,14 +21,13 @@ function resolveSsl(connectionString: string | undefined): PgSsl {
     if (verify && caCert) {
       return { rejectUnauthorized: true, ca: caCert };
     }
-    // TLS on, but allow provider cert chains without a trusted local CA bundle.
     return { rejectUnauthorized: false };
   }
 
   return false;
 }
 
-/** Drop sslmode from the URL so Pool `ssl` is the single source of truth (avoids pg verify-full alias). */
+/** Drop sslmode from the URL so Pool `ssl` is the single source of truth. */
 function poolConnectionString(raw: string | undefined): string | undefined {
   if (!raw) return raw;
   try {
@@ -53,25 +50,38 @@ const globalForPrisma = globalThis as unknown as {
   pool: Pool | undefined;
 };
 
-const rawUrl = process.env.DATABASE_URL;
+/** Prefer Aiven/Neon pooler URL in production when set. */
+const rawUrl =
+  process.env.DATABASE_POOL_URL ||
+  process.env.DATABASE_URL;
+
 const ssl = resolveSsl(rawUrl);
+const isServerless =
+  process.env.VERCEL === "1" || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+// Vercel: many concurrent lambdas × pool size = connection exhaustion on Aiven.
+// Keep max at 1 per isolate unless explicitly overridden.
+const poolMax = Number(
+  process.env.DATABASE_POOL_MAX ?? (isServerless ? 1 : 5),
+);
 
 const pool =
   globalForPrisma.pool ??
   new Pool({
     connectionString: ssl ? poolConnectionString(rawUrl) : rawUrl,
-    max: Number(process.env.DATABASE_POOL_MAX || 3),
-    connectionTimeoutMillis: 30_000,
-    idleTimeoutMillis: 10_000,
+    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 1,
+    // Release idle clients quickly so slots return to Aiven.
+    idleTimeoutMillis: isServerless ? 5_000 : 20_000,
+    connectionTimeoutMillis: 15_000,
+    allowExitOnIdle: true,
     ssl,
   });
 
 const adapter = new PrismaPg(pool);
 const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-  globalForPrisma.pool = pool;
-}
+// Always reuse across warm serverless invocations (not only in development).
+globalForPrisma.prisma = prisma;
+globalForPrisma.pool = pool;
 
 export { prisma };

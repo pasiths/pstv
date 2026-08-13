@@ -9,6 +9,7 @@ import { getCountryLongName } from "@/lib/iptv-catalog";
 import { getLanguageLongName } from "@/lib/languages";
 import { SITE } from "@/lib/site";
 import { withPsDemoFirst } from "@/lib/ps-demo";
+import { getChannelCatalogStats } from "@/lib/channel-stats";
 
 export const dynamic = "force-dynamic";
 
@@ -17,20 +18,11 @@ const PAGE_LIMIT = 72;
 export default async function HomePage() {
   const user = await getCurrentUser();
   const entitled = canAccessPremium(user);
-
   const where = { isHidden: false };
 
-  const [
-    total,
-    channels,
-    countries,
-    languages,
-    categories,
-    localCount,
-    freeCount,
-    paidCount,
-  ] = await Promise.all([
-    prisma.channel.count({ where }),
+  // Keep concurrent DB work low (serverless + small Aiven plans).
+  const [stats, channels, countries, languages, categories] = await Promise.all([
+    getChannelCatalogStats(),
     prisma.channel.findMany({
       where,
       orderBy: [
@@ -63,10 +55,9 @@ export default async function HomePage() {
       orderBy: { category: "asc" },
       take: 100,
     }),
-    prisma.channel.count({ where: { isHidden: false, isLocal: true } }),
-    prisma.channel.count({ where: { isHidden: false, isPremium: false } }),
-    prisma.channel.count({ where: { isHidden: false, isPremium: true } }),
   ]);
+
+  const { total, localCount, freeCount, paidCount } = stats;
 
   let favoriteIds: string[] = [];
   let recentChannels: typeof channels = [];

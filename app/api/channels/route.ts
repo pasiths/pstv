@@ -45,56 +45,90 @@ export async function GET(request: NextRequest) {
       : {}),
   };
 
-  const [total, rows, countries, languages, categories] = await Promise.all([
-    prisma.channel.count({ where }),
-    prisma.channel.findMany({
-      where,
-      orderBy: [
-        { isLocal: "desc" },
-        { isBroken: "asc" },
-        { isPremium: "asc" },
-        { sortOrder: "asc" },
-        { name: "asc" },
-      ],
-      skip,
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        logoUrl: true,
-        category: true,
-        country: true,
-        countryName: true,
-        language: true,
-        isLocal: true,
-        isPremium: true,
-        isBroken: true,
-        streamUrl: true,
-      },
-    }),
-    prisma.channel.findMany({
-      where: { isHidden: false },
-      distinct: ["country"],
-      select: { country: true },
-      orderBy: { country: "asc" },
-      take: 300,
-    }),
-    prisma.channel.findMany({
-      where: { isHidden: false, language: { not: null } },
-      distinct: ["language"],
-      select: { language: true },
-      orderBy: { language: "asc" },
-      take: 200,
-    }),
-    prisma.channel.findMany({
-      where: { isHidden: false },
-      distinct: ["category"],
-      select: { category: true },
-      orderBy: { category: "asc" },
-      take: 100,
-    }),
-  ]);
+  const [total, rows, countries, languages, categories] =
+    page === 1
+      ? await Promise.all([
+          prisma.channel.count({ where }),
+          prisma.channel.findMany({
+            where,
+            orderBy: [
+              { isLocal: "desc" },
+              { isBroken: "asc" },
+              { isPremium: "asc" },
+              { sortOrder: "asc" },
+              { name: "asc" },
+            ],
+            skip,
+            take: limit,
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              logoUrl: true,
+              category: true,
+              country: true,
+              countryName: true,
+              language: true,
+              isLocal: true,
+              isPremium: true,
+              isBroken: true,
+              streamUrl: true,
+            },
+          }),
+          prisma.channel.findMany({
+            where: { isHidden: false },
+            distinct: ["country"],
+            select: { country: true },
+            orderBy: { country: "asc" },
+            take: 300,
+          }),
+          prisma.channel.findMany({
+            where: { isHidden: false, language: { not: null } },
+            distinct: ["language"],
+            select: { language: true },
+            orderBy: { language: "asc" },
+            take: 200,
+          }),
+          prisma.channel.findMany({
+            where: { isHidden: false },
+            distinct: ["category"],
+            select: { category: true },
+            orderBy: { category: "asc" },
+            take: 100,
+          }),
+        ])
+      : await Promise.all([
+          prisma.channel.count({ where }),
+          prisma.channel.findMany({
+            where,
+            orderBy: [
+              { isLocal: "desc" },
+              { isBroken: "asc" },
+              { isPremium: "asc" },
+              { sortOrder: "asc" },
+              { name: "asc" },
+            ],
+            skip,
+            take: limit,
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              logoUrl: true,
+              category: true,
+              country: true,
+              countryName: true,
+              language: true,
+              isLocal: true,
+              isPremium: true,
+              isBroken: true,
+              streamUrl: true,
+            },
+          }),
+          Promise.resolve([] as { country: string }[]),
+          Promise.resolve([] as { language: string | null }[]),
+          Promise.resolve([] as { category: string }[]),
+        ]);
 
   const countryFacets = countries
     .filter((c) => c.country)

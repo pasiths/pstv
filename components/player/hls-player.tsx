@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import Hls from "hls.js";
 import {
   Loader2,
@@ -37,6 +37,7 @@ import {
   useAutoCaptions,
   type CaptionMode,
 } from "@/hooks/use-auto-captions";
+import { useMediaSession } from "@/hooks/use-media-session";
 
 const CAPTION_MODE_KEY = "fluxtv_caption_mode";
 const QUALITY_PREF_KEY = "fluxtv_quality_pref";
@@ -120,10 +121,20 @@ type HlsPlayerProps = {
   logoUrl?: string | null;
   pip?: boolean;
   useProxy?: boolean;
+  /** Keep playing / auto PiP when the tab is backgrounded (default true). */
+  backgroundPlay?: boolean;
   onPipToggle?: () => void;
+  onPlayingChange?: (playing: boolean) => void;
 };
 
-export function HlsPlayer({
+export type HlsPlayerHandle = {
+  togglePlay: () => void;
+  enterPip: () => Promise<void>;
+  getShell: () => HTMLDivElement | null;
+};
+
+export const HlsPlayer = forwardRef<HlsPlayerHandle, HlsPlayerProps>(function HlsPlayer(
+  {
   src,
   title,
   category,
@@ -131,8 +142,12 @@ export function HlsPlayer({
   logoUrl,
   pip = false,
   useProxy = true,
+  backgroundPlay = true,
   onPipToggle,
-}: HlsPlayerProps) {
+  onPlayingChange,
+}: HlsPlayerProps,
+  ref,
+) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -765,7 +780,7 @@ export function HlsPlayer({
     };
   }, []);
 
-  const togglePlay = async () => {
+  const togglePlay = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
     bumpControls();
@@ -778,7 +793,87 @@ export function HlsPlayer({
     } catch {
       // iOS may reject play until a direct user gesture unmutes / unlocks
     }
-  };
+  }, [bumpControls]);
+
+  const enterPip = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video?.requestPictureInPicture) {
+      toast.message("Picture-in-picture is not available on this device");
+      return;
+    }
+    try {
+      if (document.pictureInPictureElement === video) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch {
+      toast.error("Could not open picture-in-picture");
+    }
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      togglePlay: () => void togglePlay(),
+      enterPip,
+      getShell: () => shellRef.current,
+    }),
+    [togglePlay, enterPip],
+  );
+
+  useMediaSession({
+    title,
+    artist: [category, country].filter(Boolean).join(" · ") || "PSTV",
+    artworkUrl: logoUrl,
+    playing,
+    onPlay: () => {
+      void videoRef.current?.play().catch(() => undefined);
+    },
+    onPause: () => {
+      videoRef.current?.pause();
+    },
+    enabled: backgroundPlay,
+  });
+
+  useEffect(() => {
+    onPlayingChange?.(playing);
+  }, [playing, onPlayingChange]);
+
+  // Background play: auto picture-in-picture when the tab/app is hidden.
+  useEffect(() => {
+    if (!backgroundPlay) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onVis = () => {
+      if (!document.hidden) return;
+      if (video.paused) return;
+      if (!video.requestPictureInPicture) return;
+      if (document.pictureInPictureElement) return;
+      void video.requestPictureInPicture().catch(() => undefined);
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [backgroundPlay, ready, reloadToken]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onEnter = () => {
+      if (!pip) onPipToggle?.();
+    };
+    const onLeave = () => {
+      if (pip) onPipToggle?.();
+    };
+    video.addEventListener("enterpictureinpicture", onEnter);
+    video.addEventListener("leavepictureinpicture", onLeave);
+    return () => {
+      video.removeEventListener("enterpictureinpicture", onEnter);
+      video.removeEventListener("leavepictureinpicture", onLeave);
+    };
+  }, [pip, onPipToggle, ready, reloadToken]);
 
   const toggleFullscreen = async () => {
     const shell = shellRef.current;
@@ -1164,13 +1259,13 @@ export function HlsPlayer({
               </ControlButton>
             )}
 
-            {onPipToggle && !isIos && (
+            {!isIos && (
               <ControlButton
                 label="Picture in picture"
                 active={pip}
                 onClick={() => {
-                  onPipToggle();
                   bumpControls();
+                  void enterPip();
                 }}
               >
                 <PictureInPicture2 className="size-[1.15rem]" />
@@ -1192,7 +1287,7 @@ export function HlsPlayer({
       </div>
     </div>
   );
-}
+});
 
 function ControlButton({
   children,

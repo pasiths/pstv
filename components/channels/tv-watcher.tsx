@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { HlsPlayer } from "@/components/player/hls-player";
+import { HlsPlayer, type HlsPlayerHandle } from "@/components/player/hls-player";
+import { NowPlayingPopup } from "@/components/player/now-playing-popup";
 import { ChannelGrid, type ChannelCardData } from "@/components/channels/channel-grid";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -122,9 +123,14 @@ export function TvWatcher({
   const [localOnly, setLocalOnly] = useState(false);
   const [favorites, setFavorites] = useState(initialFavorites);
   const [pip, setPip] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [playerInView, setPlayerInView] = useState(true);
+  const [popupDismissed, setPopupDismissed] = useState(false);
   const [pending, startTransition] = useTransition();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const playerAnchorRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<HlsPlayerHandle | null>(null);
   const userPickedRef = useRef(false);
   const restoredRef = useRef(false);
 
@@ -265,6 +271,33 @@ export function TvWatcher({
     });
   }, []);
 
+  useEffect(() => {
+    setPopupDismissed(false);
+    setPlaying(false);
+  }, [activeChannel?.id]);
+
+  useEffect(() => {
+    const el = playerAnchorRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setPlayerInView(entry.isIntersecting && entry.intersectionRatio > 0.35);
+      },
+      { threshold: [0, 0.35, 0.6, 1] },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [activeChannel?.id, activeChannel?.locked, activeChannel?.isBroken]);
+
+  const showNowPlayingPopup =
+    Boolean(active) &&
+    !active?.locked &&
+    !active?.isBroken &&
+    playing &&
+    !playerInView &&
+    !popupDismissed &&
+    !pip;
+
   return (
     <div className="grid gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,1.05fr)] xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,1fr)]">
       <section className="min-w-0 space-y-3 sm:space-y-4">
@@ -324,15 +357,20 @@ export function TvWatcher({
                 ) : null}
               </div>
             ) : (
-              <HlsPlayer
-                src={active.streamUrl}
-                title={active.name}
-                category={active.category}
-                country={active.countryName || active.country}
-                logoUrl={active.logoUrl}
-                pip={pip}
-                onPipToggle={() => setPip((v) => !v)}
-              />
+              <div ref={playerAnchorRef} className="min-w-0">
+                <HlsPlayer
+                  ref={playerRef}
+                  src={active.streamUrl}
+                  title={active.name}
+                  category={active.category}
+                  country={active.countryName || active.country}
+                  logoUrl={active.logoUrl}
+                  pip={pip}
+                  backgroundPlay
+                  onPipToggle={() => setPip((v) => !v)}
+                  onPlayingChange={setPlaying}
+                />
+              </div>
             )}
             <ProgramGuide
               key={active.id}
@@ -442,6 +480,31 @@ export function TvWatcher({
           <div ref={sentinelRef} className="h-8" />
         </div>
       </aside>
+
+      {active ? (
+        <NowPlayingPopup
+          open={showNowPlayingPopup}
+          title={active.name}
+          subtitle={[active.category, active.countryName || active.country]
+            .filter(Boolean)
+            .join(" · ")}
+          logoUrl={active.logoUrl}
+          playing={playing}
+          onPlayPause={() => playerRef.current?.togglePlay()}
+          onOpenPip={() => {
+            void playerRef.current?.enterPip();
+            setPopupDismissed(true);
+          }}
+          onClose={() => setPopupDismissed(true)}
+          onFocusPlayer={() => {
+            setPopupDismissed(true);
+            playerAnchorRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,33 +1,171 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
+import { Loader2, Volume2, VolumeX } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { proxiedStreamUrl } from "@/lib/utils";
-
-const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
 
 type HlsPlayerProps = {
   src: string;
   title?: string;
   pip?: boolean;
-  useProxy?: boolean;
+  /** Force proxy. Default: try direct first, then proxy on failure. */
+  useProxy?: boolean | "auto";
 };
 
 export function HlsPlayer({
   src,
   title,
   pip = false,
-  useProxy = true,
+  useProxy = "auto",
 }: HlsPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const playSrc = useProxy ? proxiedStreamUrl(src) : src;
+  const [muted, setMuted] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [proxyMode, setProxyMode] = useState(useProxy === true);
+
+  const playSrc =
+    useProxy === true || proxyMode ? proxiedStreamUrl(src) : src;
 
   useEffect(() => {
+    setProxyMode(useProxy === true);
+  }, [src, useProxy]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !playSrc) return;
+
+    let cancelled = false;
     setReady(false);
     setError(null);
-  }, [playSrc]);
+
+    const fail = (message: string, canFallbackToProxy: boolean) => {
+      if (cancelled) return;
+      if (canFallbackToProxy && useProxy === "auto" && !proxyMode) {
+        setProxyMode(true);
+        return;
+      }
+      setError(message);
+    };
+
+    const startPlayback = async () => {
+      try {
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = playSrc;
+          video.onloadedmetadata = () => {
+            if (!cancelled) setReady(true);
+          };
+          video.onerror = () =>
+            fail(
+              `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
+              true,
+            );
+          await video.play().catch(() => undefined);
+          return;
+        }
+
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 30,
+            startLevel: 0,
+            abrEwmaDefaultEstimate: 500_000,
+          });
+          hlsRef.current = hls;
+          hls.loadSource(playSrc);
+          hls.attachMedia(video);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+            if (cancelled) return;
+            setReady(true);
+            try {
+              await video.play();
+            } catch {
+              // muted autoplay
+            }
+          });
+
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (cancelled || !data.fatal) return;
+
+            if (
+              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+              useProxy === "auto" &&
+              !proxyMode
+            ) {
+              hls.destroy();
+              hlsRef.current = null;
+              setProxyMode(true);
+              return;
+            }
+
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+              fail(
+                `Unable to play${title ? ` ${title}` : ""}. Network error loading stream.`,
+                false,
+              );
+              return;
+            }
+
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+              return;
+            }
+
+            fail(
+              `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
+              false,
+            );
+            hls.destroy();
+          });
+          return;
+        }
+
+        fail("HLS is not supported in this browser.", false);
+      } catch {
+        fail(
+          `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
+          true,
+        );
+      }
+    };
+
+    void startPlayback();
+
+    return () => {
+      cancelled = true;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, [playSrc, title, reloadToken, proxyMode, useProxy]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = muted;
+  }, [muted]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !pip) return;
+    if (document.pictureInPictureElement === video) return;
+    void video.requestPictureInPicture?.().catch(() => undefined);
+    return () => {
+      if (document.pictureInPictureElement === video) {
+        void document.exitPictureInPicture?.().catch(() => undefined);
+      }
+    };
+  }, [pip]);
 
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/60 bg-black shadow-lg">
@@ -37,28 +175,46 @@ export function HlsPlayer({
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 px-6 text-center text-sm text-red-300">
-          {error}
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 px-6 text-center text-sm text-red-300">
+          <p>{error}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setError(null);
+              setReady(false);
+              setProxyMode(useProxy === true);
+              setReloadToken((n) => n + 1);
+            }}
+          >
+            Retry
+          </Button>
         </div>
       )}
-      <ReactPlayer
-        key={playSrc}
-        src={playSrc}
-        playing
+      <video
+        ref={videoRef}
+        className="absolute inset-0 size-full bg-black object-contain"
         controls
-        width="100%"
-        height="100%"
-        pip={pip}
         playsInline
-        muted={false}
-        style={{ position: "absolute", inset: 0 }}
-        onReady={() => setReady(true)}
-        onError={() =>
-          setError(
-            `Unable to play${title ? ` ${title}` : ""}. The stream may be offline or blocked.`,
-          )
-        }
+        muted={muted}
+        autoPlay
       />
+      <div className="absolute top-3 right-3 z-20">
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="bg-black/60 text-white hover:bg-black/80"
+          onClick={() => {
+            setMuted((m) => !m);
+            void videoRef.current?.play();
+          }}
+        >
+          {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+          {muted ? "Unmute" : "Mute"}
+        </Button>
+      </div>
     </div>
   );
 }

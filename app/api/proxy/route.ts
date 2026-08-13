@@ -4,6 +4,33 @@ export const runtime = "nodejs";
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
+function rewritePlaylist(text: string, base: URL, origin: string) {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+
+      if (trimmed.startsWith("#")) {
+        if (
+          trimmed.startsWith("#EXT-X-KEY") ||
+          trimmed.startsWith("#EXT-X-MAP") ||
+          trimmed.startsWith("#EXT-X-MEDIA")
+        ) {
+          return line.replace(/URI="([^"]+)"/gi, (_, uri: string) => {
+            const abs = new URL(uri, base).toString();
+            return `URI="${origin}/api/proxy?url=${encodeURIComponent(abs)}"`;
+          });
+        }
+        return line;
+      }
+
+      const abs = new URL(trimmed, base).toString();
+      return `${origin}/api/proxy?url=${encodeURIComponent(abs)}`;
+    })
+    .join("\n");
+}
+
 export async function GET(request: NextRequest) {
   const target = request.nextUrl.searchParams.get("url");
   if (!target) {
@@ -25,7 +52,7 @@ export async function GET(request: NextRequest) {
     const upstream = await fetch(parsed.toString(), {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; FluxTV/1.0; +https://localhost)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "*/*",
         ...(request.headers.get("range")
           ? { Range: request.headers.get("range")! }
@@ -35,38 +62,28 @@ export async function GET(request: NextRequest) {
       redirect: "follow",
     });
 
-    const contentType = upstream.headers.get("content-type") || "";
-    const body = Buffer.from(await upstream.arrayBuffer());
+    if (!upstream.ok && upstream.status !== 206) {
+      return NextResponse.json(
+        { error: `Upstream ${upstream.status}` },
+        { status: 502 },
+      );
+    }
 
-    // Rewrite absolute/relative playlist URLs so segment requests also go through proxy
-    if (
+    const contentType = upstream.headers.get("content-type") || "";
+    const origin = request.nextUrl.origin;
+    const looksLikePlaylist =
       contentType.includes("mpegurl") ||
       contentType.includes("m3u8") ||
-      parsed.pathname.endsWith(".m3u8") ||
-      body.subarray(0, 7).toString().includes("#EXTM3U")
-    ) {
-      const text = body.toString("utf8");
-      const base = parsed;
-      const rewritten = text
-        .split("\n")
-        .map((line) => {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith("#")) {
-            if (trimmed.startsWith("#EXT-X-KEY") || trimmed.startsWith("#EXT-X-MAP")) {
-              return line.replace(/URI="([^"]+)"/g, (_, uri: string) => {
-                const abs = new URL(uri, base).toString();
-                return `URI="/api/proxy?url=${encodeURIComponent(abs)}"`;
-              });
-            }
-            return line;
-          }
-          const abs = new URL(trimmed, base).toString();
-          return `/api/proxy?url=${encodeURIComponent(abs)}`;
-        })
-        .join("\n");
+      parsed.pathname.toLowerCase().endsWith(".m3u8");
 
+    if (looksLikePlaylist) {
+      const text = await upstream.text();
+      if (!text.includes("#EXTM3U") && !parsed.pathname.toLowerCase().endsWith(".m3u8")) {
+        // Not actually a playlist — fall through should not happen often
+      }
+      const rewritten = rewritePlaylist(text, parsed, origin);
       return new NextResponse(rewritten, {
-        status: upstream.status,
+        status: 200,
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl",
           "Access-Control-Allow-Origin": "*",
@@ -86,7 +103,8 @@ export async function GET(request: NextRequest) {
     const acceptRanges = upstream.headers.get("accept-ranges");
     if (acceptRanges) headers.set("Accept-Ranges", acceptRanges);
 
-    return new NextResponse(body, {
+    // Stream segments — do not buffer entire .ts files in memory
+    return new NextResponse(upstream.body, {
       status: upstream.status,
       headers,
     });

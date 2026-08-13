@@ -167,7 +167,7 @@ export async function castHlsMedia(input: {
     mediaInfo.streamType = window.chrome.cast.media.StreamType.LIVE;
     const metadata = new window.chrome.cast.media.GenericMediaMetadata();
     metadata.metadataType = window.chrome.cast.media.MetadataType.GENERIC;
-    metadata.title = input.title || "FluxTV";
+    metadata.title = input.title || "PSTV";
     metadata.subtitle = input.subtitle || "Live TV";
     if (input.poster) {
       metadata.images = [{ url: input.poster }];

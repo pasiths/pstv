@@ -46,8 +46,10 @@ export default function RegisterPage() {
           <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-xl bg-teal-600 text-white">
             <Radio className="size-5" />
           </div>
-          <CardTitle className="font-heading text-2xl">Join FluxTV</CardTitle>
-          <CardDescription>Create a free account for My List</CardDescription>
+          <CardTitle className="font-heading text-2xl">Join PSTV</CardTitle>
+          <CardDescription>
+            Create a free account for My List · education & development only
+          </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>
           <CardContent className="space-y-4">

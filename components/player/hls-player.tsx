@@ -640,7 +640,7 @@ export function HlsPlayer({
     toast.message("Connecting to Chromecast…");
     const result = await castHlsMedia({
       contentUrl: src,
-      title: title || "FluxTV",
+      title: title || "PSTV",
       subtitle: [category, country].filter(Boolean).join(" · ") || "Live TV",
       poster: logoUrl,
     });
@@ -757,7 +757,7 @@ export function HlsPlayer({
           )}
           <span className="hidden items-center gap-1.5 rounded-full border border-teal-400/25 bg-teal-500/10 px-2.5 py-1 text-[10px] font-medium tracking-wide text-teal-200 uppercase sm:inline-flex">
             <Radio className="size-3" />
-            FluxTV
+            PSTV
           </span>
         </div>
         {title && (

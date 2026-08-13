@@ -3,9 +3,11 @@ import { getCurrentUser } from "@/lib/session";
 import { canAccessAdmin } from "@/lib/permissions";
 import { canAccessPremium, mapPublicChannel } from "@/lib/premium";
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { TvWatcher } from "@/components/channels/tv-watcher";
 import { getCountryLongName } from "@/lib/iptv-catalog";
 import { getLanguageLongName } from "@/lib/languages";
+import { SITE } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
@@ -120,15 +122,16 @@ export default async function HomePage() {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         <div className="mb-6">
           <p className="text-xs font-medium tracking-[0.2em] text-teal-500 uppercase">
-            Free & paid live television
+            {SITE.tagline}
           </p>
           <h1 className="font-heading mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
-            FluxTV
+            {SITE.name}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
             {localCount.toLocaleString()} local LK · {freeCount.toLocaleString()} free ·{" "}
             {paidCount.toLocaleString()} paid · {total.toLocaleString()} total.
-            Paid channels stay locked until your account has premium access.
+            Installable on iPhone, Android, and Windows as a web app.{" "}
+            <span className="text-foreground/80">{SITE.educationNotice}</span>
           </p>
         </div>
         <TvWatcher
@@ -162,6 +165,7 @@ export default async function HomePage() {
           pageSize={PAGE_LIMIT}
         />
       </main>
+      <SiteFooter />
     </div>
   );
 }

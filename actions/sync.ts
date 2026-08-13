@@ -48,7 +48,7 @@ function revalidateCatalog() {
 async function fetchPlaylist(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "FluxTV/1.0" },
+      headers: { "User-Agent": "PSTV/1.0" },
       cache: "no-store",
     });
     if (!res.ok) return null;

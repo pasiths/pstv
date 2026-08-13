@@ -21,7 +21,7 @@ export function SiteHeader({ user, isAdmin }: SiteHeaderProps) {
             <Radio className="size-4" />
           </span>
           <span className="font-heading text-lg">
-            Flux<span className="text-teal-500">TV</span>
+            PS<span className="text-teal-500">TV</span>
           </span>
         </Link>
 

@@ -46,8 +46,10 @@ export default function LoginPage() {
           <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-xl bg-teal-600 text-white">
             <Radio className="size-5" />
           </div>
-          <CardTitle className="font-heading text-2xl">Welcome to FluxTV</CardTitle>
-          <CardDescription>Sign in to sync favorites and history</CardDescription>
+          <CardTitle className="font-heading text-2xl">Welcome to PSTV</CardTitle>
+          <CardDescription>
+            Sign in to sync favorites and history · education-only lab by pasiths.tech
+          </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>
           <CardContent className="space-y-4">

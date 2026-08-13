@@ -114,38 +114,38 @@ async function seedAuth() {
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
   await upsertUser({
-    name: "FluxTV Super Admin",
+    name: "PSTV Super Admin",
     email: "superadmin@fluxtv.local",
     passwordHash,
     isPremium: true,
-    imageSeed: "FluxSuperAdmin",
+    imageSeed: "PstvSuperAdmin",
     roleId: superAdminRole.id,
   });
 
   await upsertUser({
-    name: "FluxTV Admin",
+    name: "PSTV Admin",
     email: "admin@fluxtv.local",
     passwordHash,
     isPremium: true,
-    imageSeed: "FluxAdmin",
+    imageSeed: "PstvAdmin",
     roleId: adminRole.id,
   });
 
   await upsertUser({
-    name: "FluxTV Premium",
+    name: "PSTV Premium",
     email: "premium@fluxtv.local",
     passwordHash,
     isPremium: true,
-    imageSeed: "FluxPremium",
+    imageSeed: "PstvPremium",
     roleId: premiumRole.id,
   });
 
   await upsertUser({
-    name: "FluxTV Free User",
+    name: "PSTV Free User",
     email: "user@fluxtv.local",
     passwordHash,
     isPremium: false,
-    imageSeed: "FluxUser",
+    imageSeed: "PstvUser",
     roleId: userRole.id,
   });
 
@@ -162,7 +162,7 @@ async function seedAuth() {
 async function seedLocalChannels() {
   console.log("📡 Fetching Sri Lanka streams from iptv-org...");
   const playlistRes = await fetch(LK_PLAYLIST, {
-    headers: { "User-Agent": "FluxTV-Seed/1.0" },
+    headers: { "User-Agent": "PSTV-Seed/1.0" },
     cache: "no-store",
   });
 
@@ -300,7 +300,7 @@ async function seedLocalChannels() {
 }
 
 async function main() {
-  console.log("🌱 Seeding FluxTV (safe upsert — keeps existing catalog)…");
+  console.log("🌱 Seeding PSTV (safe upsert — keeps existing catalog)…");
 
   await seedAuth();
   const channels = await seedLocalChannels();

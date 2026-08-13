@@ -297,7 +297,7 @@ export function TvWatcher({
                   {active.name}
                 </p>
                 <p className="max-w-md text-sm text-red-100/85">
-                  Not working — no live stream URL is available right now. FluxTV
+                  Not working — no live stream URL is available right now. PSTV
                   will auto-retry alternate links on the next health check.
                 </p>
                 {active.streamUrl ? (

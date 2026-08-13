@@ -137,6 +137,7 @@ export function TvWatcher({
               title={active.name}
               category={active.category}
               country={active.country}
+              logoUrl={active.logoUrl}
               pip={pip}
               onPipToggle={() => setPip((v) => !v)}
             />

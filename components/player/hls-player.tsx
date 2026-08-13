@@ -13,15 +13,29 @@ import {
   Play,
   Radio,
   PictureInPicture2,
+  Cast,
+  Airplay,
+  Share2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { cn, proxiedStreamUrl } from "@/lib/utils";
+import {
+  castHlsMedia,
+  initCastContext,
+  promptAirPlay,
+  promptRemotePlayback,
+  supportsAirPlay,
+} from "@/lib/cast";
 
 type HlsPlayerProps = {
   src: string;
   title?: string;
   category?: string;
   country?: string;
+  logoUrl?: string | null;
   pip?: boolean;
   useProxy?: boolean;
   onPipToggle?: () => void;
@@ -32,6 +46,7 @@ export function HlsPlayer({
   title,
   category,
   country,
+  logoUrl,
   pip = false,
   useProxy = true,
   onPipToggle,
@@ -49,6 +64,9 @@ export function HlsPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
+  const [castAvailable, setCastAvailable] = useState(false);
+  const [casting, setCasting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const playSrc = useProxy ? proxiedStreamUrl(src) : src;
 
@@ -59,6 +77,55 @@ export function HlsPlayer({
       if (playing && !error) setControlsVisible(false);
     }, 2800);
   }, [playing, error]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void initCastContext().then((ctx) => {
+      if (cancelled || !ctx || !window.cast?.framework) return;
+      setCastAvailable(true);
+      const onState = (e: { castState?: string }) => {
+        const connected =
+          e.castState === window.cast?.framework?.CastState.CONNECTED;
+        setCasting(Boolean(connected));
+      };
+      ctx.addEventListener(
+        window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+        onState,
+      );
+      onState({ castState: ctx.getCastState() });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.setAttribute("x-webkit-airplay", "allow");
+    video.setAttribute("airplay", "allow");
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onAirPlay = (event: Event) => {
+      // Availability changes are informational; picker still works when supported.
+      void (event as Event & { availability?: string }).availability;
+    };
+
+    video.addEventListener(
+      "webkitplaybacktargetavailabilitychanged",
+      onAirPlay as EventListener,
+    );
+    return () => {
+      video.removeEventListener(
+        "webkitplaybacktargetavailabilitychanged",
+        onAirPlay as EventListener,
+      );
+    };
+  }, [ready]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -256,6 +323,70 @@ export function HlsPlayer({
     }
   };
 
+  const handleCast = async () => {
+    bumpControls();
+    toast.message("Connecting to Chromecast…");
+    const result = await castHlsMedia({
+      contentUrl: src,
+      title: title || "FluxTV",
+      subtitle: [category, country].filter(Boolean).join(" · ") || "Live TV",
+      poster: logoUrl,
+    });
+    if (result.success) {
+      setCasting(true);
+      toast.success(
+        result.deviceName
+          ? `Casting to ${result.deviceName}`
+          : "Casting to your TV",
+      );
+    } else {
+      toast.error(result.error ?? "Cast failed");
+    }
+  };
+
+  const handleAirPlay = async () => {
+    bumpControls();
+    const video = videoRef.current;
+    if (supportsAirPlay(video)) {
+      promptAirPlay(video);
+      return;
+    }
+    const remote = await promptRemotePlayback(video);
+    if (!remote.success) {
+      toast.error(remote.error ?? "AirPlay / remote playback unavailable");
+    }
+  };
+
+  const handleShare = async () => {
+    bumpControls();
+    const shareUrl = typeof window !== "undefined" ? window.location.href : src;
+    const payload = {
+      title: title ? `${title} · FluxTV` : "FluxTV",
+      text: `Watch ${title || "live TV"} on FluxTV`,
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+        return;
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      toast.success("Link copied");
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(src);
+        setCopied(true);
+        toast.success("Stream URL copied");
+        setTimeout(() => setCopied(false), 1600);
+      } catch {
+        toast.error("Unable to share");
+      }
+    }
+  };
+
   return (
     <div
       ref={shellRef}
@@ -271,7 +402,6 @@ export function HlsPlayer({
       }}
       onClick={bumpControls}
     >
-      {/* subtle frame glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-teal-500/15"
@@ -284,13 +414,13 @@ export function HlsPlayer({
         muted={muted}
         autoPlay
         preload="auto"
+        disableRemotePlayback={false}
         onClick={(e) => {
           e.stopPropagation();
           void togglePlay();
         }}
       />
 
-      {/* top gradient + meta */}
       <div
         className={cn(
           "pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/80 via-black/35 to-transparent px-4 pt-4 pb-16 transition-opacity duration-300",
@@ -304,6 +434,12 @@ export function HlsPlayer({
                 <span className="size-1.5 animate-pulse rounded-full bg-white" />
                 Live
               </span>
+              {casting && (
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-teal-600/90 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white uppercase">
+                  <Cast className="size-3" />
+                  Casting
+                </span>
+              )}
               {category && (
                 <span className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/75 backdrop-blur-sm">
                   {category}
@@ -330,7 +466,6 @@ export function HlsPlayer({
         </div>
       </div>
 
-      {/* loading */}
       {(!ready || buffering) && !error && (
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[#05080c]/55 backdrop-blur-[2px]">
           <div className="relative">
@@ -345,7 +480,6 @@ export function HlsPlayer({
         </div>
       )}
 
-      {/* error */}
       {error && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-[#0a0f14]/92 px-6 text-center backdrop-blur-sm">
           <div className="flex size-12 items-center justify-center rounded-full border border-red-400/30 bg-red-500/10">
@@ -369,13 +503,12 @@ export function HlsPlayer({
         </div>
       )}
 
-      {/* bottom controls */}
       <div
         className={cn(
           "absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pt-16 pb-3 transition-all duration-300 sm:px-4 sm:pb-4",
           controlsVisible || !ready || error
             ? "translate-y-0 opacity-100"
-            : "translate-y-2 opacity-0 pointer-events-none",
+            : "pointer-events-none translate-y-2 opacity-0",
         )}
       >
         <div className="mb-3 h-0.5 overflow-hidden rounded-full bg-white/10">
@@ -405,7 +538,42 @@ export function HlsPlayer({
             </ControlButton>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <ControlButton label="Share" onClick={() => void handleShare()}>
+              {copied ? <Check className="size-4" /> : <Share2 className="size-4" />}
+            </ControlButton>
+            <ControlButton
+              label="Copy stream URL"
+              onClick={async () => {
+                bumpControls();
+                try {
+                  await navigator.clipboard.writeText(src);
+                  setCopied(true);
+                  toast.success("Stream URL copied");
+                  setTimeout(() => setCopied(false), 1600);
+                } catch {
+                  toast.error("Copy failed");
+                }
+              }}
+            >
+              <Copy className="size-4" />
+            </ControlButton>
+            <ControlButton label="AirPlay / Apple TV" onClick={() => void handleAirPlay()}>
+              <Airplay className="size-4" />
+            </ControlButton>
+            <ControlButton
+              label={
+                castAvailable
+                  ? casting
+                    ? "Connected to Chromecast"
+                    : "Chromecast"
+                  : "Chromecast (loading…)"
+              }
+              active={casting}
+              onClick={() => void handleCast()}
+            >
+              <Cast className="size-4" />
+            </ControlButton>
             {onPipToggle && (
               <ControlButton
                 label="Picture in picture"
@@ -440,24 +608,29 @@ function ControlButton({
   label,
   onClick,
   active,
+  disabled,
 }: {
   children: React.ReactNode;
   label: string;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       aria-label={label}
+      title={label}
+      disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
       className={cn(
         "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-white transition",
-        "border-white/10 bg-white/5 hover:bg-white/15 hover:border-white/20",
+        "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/15",
         "backdrop-blur-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/50",
+        "disabled:cursor-not-allowed disabled:opacity-40",
         active && "border-teal-400/40 bg-teal-500/20 text-teal-100",
       )}
     >

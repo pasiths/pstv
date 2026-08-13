@@ -96,14 +96,14 @@ export function TvWatcher({
   pageSize = 72,
   localCatalog = false,
 }: TvWatcherProps) {
-  const [channels, setChannels] = useState(initialChannels);
+  const [remoteChannels, setRemoteChannels] = useState(initialChannels);
+  const channels = localCatalog ? initialChannels : remoteChannels;
   const [total, setTotal] = useState(initialTotal ?? initialChannels.length);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(
     !localCatalog && initialChannels.length < (initialTotal ?? initialChannels.length),
   );
   const [loadingMore, setLoadingMore] = useState(false);
-  const [activeId, setActiveId] = useState(initialChannels[0]?.id ?? null);
   const [activeChannel, setActiveChannel] = useState<WatcherChannel | null>(
     initialChannels[0] ?? null,
   );
@@ -140,8 +140,10 @@ export function TvWatcher({
       initialChannels.find((c) => c.id === saved.id) ??
       recentChannels.find((c) => c.id === saved.id) ??
       saved;
-    setActiveId(fresh.id);
-    setActiveChannel(fresh);
+    // Defer so we don't sync-set during effect render (React 19 lint).
+    queueMicrotask(() => {
+      setActiveChannel(fresh);
+    });
   }, [initialChannels, recentChannels]);
 
   useEffect(() => {
@@ -171,35 +173,30 @@ export function TvWatcher({
       setTotal(data.total);
       setHasMore(data.hasMore);
       setPage(data.page);
-      setChannels((prev) => (replace ? data.channels : [...prev, ...data.channels]));
+      setRemoteChannels((prev) =>
+        replace ? data.channels : [...prev, ...data.channels],
+      );
       if (!userPickedRef.current) {
-        setActiveChannel((current) => {
-          if (current) return current;
-          const first = data.channels[0] ?? null;
-          if (first) setActiveId(first.id);
-          return first;
-        });
+        setActiveChannel((current) => current ?? data.channels[0] ?? null);
       }
     },
     [pageSize, debouncedQuery, country, language, category, localOnly],
   );
 
   useEffect(() => {
-    if (localCatalog) {
-      setChannels(initialChannels);
-      setTotal(initialChannels.length);
-      setHasMore(false);
-      return;
-    }
+    if (localCatalog) return;
     let cancelled = false;
-    setLoadingMore(true);
-    void fetchPage(1, true).finally(() => {
-      if (!cancelled) setLoadingMore(false);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setLoadingMore(true);
+      void fetchPage(1, true).finally(() => {
+        if (!cancelled) setLoadingMore(false);
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchPage, localCatalog, initialChannels]);
+  }, [fetchPage, localCatalog]);
 
   useEffect(() => {
     if (localCatalog) return;
@@ -220,6 +217,7 @@ export function TvWatcher({
   }, [fetchPage, hasMore, loadingMore, page, localCatalog]);
 
   const active = activeChannel;
+  const shownTotal = localCatalog ? channels.length : total;
 
   useEffect(() => {
     if (!active?.id) return;
@@ -231,7 +229,6 @@ export function TvWatcher({
   const onSelect = useCallback(
     (id: string, channel?: WatcherChannel) => {
       userPickedRef.current = true;
-      setActiveId(id);
       const selected =
         channel ??
         channels.find((c) => c.id === id) ??
@@ -329,12 +326,17 @@ export function TvWatcher({
               />
             )}
             <ProgramGuide
+              key={active.id}
               channelId={active.id}
               channelName={active.name}
               category={active.category}
             />
             {enableChat && active.category === "Sports" && (
-              <LiveChatroom channelName={active.name} userName={userName} />
+              <LiveChatroom
+                key={active.id}
+                channelName={active.name}
+                userName={userName}
+              />
             )}
           </>
         ) : (
@@ -411,7 +413,7 @@ export function TvWatcher({
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            Showing {channels.length.toLocaleString()} of {total.toLocaleString()}
+            Showing {channels.length.toLocaleString()} of {shownTotal.toLocaleString()}
             {pending || loadingMore ? " · loading…" : ""}
           </p>
         </div>

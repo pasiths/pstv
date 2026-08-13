@@ -58,23 +58,24 @@ export async function POST(request: NextRequest) {
   }
 
   const file = form.get("audio");
-  if (!(file instanceof File) && !(file instanceof Blob)) {
+  if (typeof file !== "object" || file === null || !("arrayBuffer" in file)) {
     return NextResponse.json({ error: "Missing audio file" }, { status: 400 });
   }
 
-  if (file.size < 1200) {
+  const blob = file as Blob;
+  if (blob.size < 1200) {
     return NextResponse.json({ text: "", skipped: true });
   }
-  if (file.size > MAX_BYTES) {
+  if (blob.size > MAX_BYTES) {
     return NextResponse.json({ error: "Audio chunk too large" }, { status: 413 });
   }
 
   const filename =
-    (file instanceof File && file.name) ||
-    `chunk.${guessExt(file.type || "audio/webm")}`;
+    ("name" in blob && typeof (blob as File).name === "string" && (blob as File).name) ||
+    `chunk.${guessExt(blob.type || "audio/webm")}`;
 
   const outbound = new FormData();
-  outbound.append("file", file, filename);
+  outbound.append("file", blob, filename);
   outbound.append("model", provider.model);
   outbound.append("response_format", "json");
 

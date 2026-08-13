@@ -367,7 +367,7 @@ export async function syncInternationalChannels(limit = 300): Promise<ImportResu
       cats.map((c) => fetchPlaylist(categoryPlaylistUrl(c))),
     );
     const per = Math.ceil(limit / cats.length);
-    const parsed = texts.flatMap((text, i) =>
+    const parsed = texts.flatMap((text) =>
       text ? parseM3u(text).slice(0, per) : [],
     );
     const result = await upsertParsedChannels(parsed, { markLocal: false });

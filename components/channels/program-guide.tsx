@@ -25,10 +25,6 @@ export function ProgramGuide({ channelId, channelName }: ProgramGuideProps) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setPrograms([]);
-    setSource(null);
-    setExpanded(false);
 
     fetch(`/api/epg?channelId=${encodeURIComponent(channelId)}`)
       .then(async (r) => {

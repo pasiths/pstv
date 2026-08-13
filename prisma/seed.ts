@@ -1,28 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import * as bcrypt from "bcryptjs";
 import { generateSlug } from "@/lib/utils";
+import { normalizeCategory, parseM3u } from "@/lib/m3u";
 
-const DEMO_STREAMS = [
-  "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-  "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8",
-  "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
-];
-
-const LOCAL_CHANNELS = [
-  { name: "Rupavahini", category: "General", language: "si" },
-  { name: "ITN", category: "News", language: "si" },
-  { name: "Sirasa TV", category: "Entertainment", language: "si" },
-  { name: "TV Derana", category: "Entertainment", language: "si" },
-  { name: "Hiru TV", category: "Entertainment", language: "si" },
-  { name: "Swarnavahini", category: "General", language: "si" },
-  { name: "Channel Eye", category: "Kids", language: "si" },
-  { name: "Siyatha TV", category: "News", language: "si" },
-  { name: "Ada Derana 24", category: "News", language: "si" },
-  { name: "TV1", category: "General", language: "si" },
-  { name: "Shakthi TV", category: "Entertainment", language: "ta" },
-  { name: "Vasantham TV", category: "Entertainment", language: "ta" },
-  { name: "Dialog Cricket", category: "Sports", language: "en" },
-];
+const LK_PLAYLIST = "https://iptv-org.github.io/iptv/countries/lk.m3u";
 
 async function main() {
   console.log("🌱 Seeding FluxTV...");
@@ -74,8 +55,8 @@ async function main() {
     ]),
   });
 
-  const userPerms = permissions.filter((p) =>
-    p.slug === "account-settings-index",
+  const userPerms = permissions.filter(
+    (p) => p.slug === "account-settings-index",
   );
   await prisma.rolePermission.createMany({
     data: userPerms.map((permission) => ({
@@ -101,26 +82,49 @@ async function main() {
     data: { userId: superAdmin.id, roleId: superAdminRole.id },
   });
 
-  for (let i = 0; i < LOCAL_CHANNELS.length; i++) {
-    const ch = LOCAL_CHANNELS[i];
-    await prisma.channel.create({
-      data: {
-        name: ch.name,
-        slug: generateSlug(ch.name),
-        streamUrl: DEMO_STREAMS[i % DEMO_STREAMS.length],
-        logoUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(ch.name)}&backgroundColor=0f766e`,
-        country: "LK",
-        countryName: "Sri Lanka",
-        language: ch.language,
-        category: ch.category,
-        isLocal: true,
-        sortOrder: i,
-      },
-    });
+  console.log("📡 Fetching real Sri Lanka streams from iptv-org...");
+  const playlistRes = await fetch(LK_PLAYLIST, {
+    headers: { "User-Agent": "FluxTV-Seed/1.0" },
+  });
+
+  if (!playlistRes.ok) {
+    throw new Error(`Failed to download LK playlist (${playlistRes.status})`);
   }
 
-  // Sample EPG for first channel
-  const first = await prisma.channel.findFirst({ where: { isLocal: true } });
+  const parsed = parseM3u(await playlistRes.text());
+  let sortOrder = 0;
+
+  for (const item of parsed) {
+    const externalId = item.externalId || `lk:${generateSlug(item.name)}`;
+    let slug = generateSlug(item.name);
+    if (!slug) slug = `channel-${sortOrder}`;
+    const slugTaken = await prisma.channel.findUnique({ where: { slug } });
+    if (slugTaken) slug = `${slug}-${sortOrder}`;
+
+    await prisma.channel.create({
+      data: {
+        name: item.name,
+        slug,
+        streamUrl: item.streamUrl,
+        logoUrl:
+          item.logoUrl ||
+          `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(item.name)}&backgroundColor=0f766e`,
+        country: "LK",
+        countryName: "Sri Lanka",
+        language: item.language,
+        category: normalizeCategory(item.category),
+        isLocal: true,
+        externalId,
+        sortOrder,
+      },
+    });
+    sortOrder += 1;
+  }
+
+  const first = await prisma.channel.findFirst({
+    where: { isLocal: true },
+    orderBy: { sortOrder: "asc" },
+  });
   if (first) {
     const now = new Date();
     const hour = 60 * 60 * 1000;
@@ -128,15 +132,15 @@ async function main() {
       data: [
         {
           channelId: first.id,
-          title: "Morning News",
-          description: "Daily headlines and updates",
+          title: "Live broadcast",
+          description: "Now on air",
           startsAt: new Date(now.getTime() - hour),
           endsAt: new Date(now.getTime() + hour),
         },
         {
           channelId: first.id,
-          title: "Prime Time Drama",
-          description: "Evening entertainment",
+          title: "Upcoming program",
+          description: "Next on this channel",
           startsAt: new Date(now.getTime() + hour),
           endsAt: new Date(now.getTime() + 2 * hour),
         },
@@ -146,7 +150,7 @@ async function main() {
 
   console.log("✅ Seed complete.");
   console.log("   Admin: superadmin@fluxtv.local / 12345678");
-  console.log(`   Local channels: ${LOCAL_CHANNELS.length}`);
+  console.log(`   Real LK channels imported: ${parsed.length}`);
 }
 
 main()

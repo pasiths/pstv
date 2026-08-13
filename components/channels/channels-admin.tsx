@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,7 +69,13 @@ export function ChannelsAdmin({ channels }: { channels: AdminChannel[] }) {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button asChild variant="outline">
+          <Link href="/dashboard/import">Import real streams (M3U / iptv-org)</Link>
+        </Button>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
       <form
         onSubmit={onSubmit}
         className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-4"
@@ -180,6 +187,7 @@ export function ChannelsAdmin({ channels }: { channels: AdminChannel[] }) {
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }

@@ -36,6 +36,9 @@ export default async function DashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/dashboard/import">Import channels</Link>
+            </Button>
             <form
               action={async () => {
                 "use server";
@@ -43,7 +46,7 @@ export default async function DashboardPage() {
               }}
             >
               <Button type="submit" variant="outline">
-                Sync iptv-org
+                Sync mixed catalog
               </Button>
             </form>
             <form

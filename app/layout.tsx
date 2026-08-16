@@ -32,7 +32,14 @@ export const metadata: Metadata = {
   publisher: SITE.developer.name,
   keywords: [
     "PSTV",
+    "Pasith Pabasara Senevirathna",
     "Pasith Senevirathna",
+    "pasith",
+    "pabasara",
+    "senevirathna",
+    "pasiths",
+    "pscreator",
+    "pasiths dev",
     "pasiths.tech",
     "tv.pasiths.tech",
     "education",
@@ -56,9 +63,9 @@ export const metadata: Metadata = {
     images: [
       {
         url: "/og.png",
-        width: 1376,
-        height: 768,
-        alt: `${SITE.name} — education-only live TV lab`,
+        width: 1200,
+        height: 630,
+        alt: `${SITE.name} — education-only live TV lab by ${SITE.developer.name}`,
       },
     ],
   },
